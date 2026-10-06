@@ -1,0 +1,88 @@
+# de25_hps_smoke — declarative vendor-IP manifest (RTL-P3.682).
+#
+# This declares the Agilex 5 HPS subsystem + the fabric IPs BY NAME/TYPE. `rr`
+# OWNS generation: sdk/engine/hps_preset.py renders the qsys-script from this
+# declaration (the harvested DE25 GHRD config facts are the defaults; overrides
+# below are explicit) and runs qsys-generate to emit the hps-handoff. There is
+# NO hand-authored gen_bd.tcl / qsys-script and NO hand-curated sources list —
+# the whole HPS subsystem is generated from these declarations.
+#
+# Config values are harvested as BOARD FACTS (like a pinout) from:
+#   …/DE25_revD_extracted/.../GHRD/hps_subsys/ip/hps_subsys/agilex_hps.ip
+#   …/GHRD/hps_subsys/ip/hps_subsys/f2sdram_adapter.ip
+#   …/GHRD/peripheral_subsys/peripheral_subsys.qsys  (PIO on lwh2f)
+# We harvest the config facts, not the vendor flow/structure.
+
+platform:
+  # The HPS platform/preset rr generates for this project. `system` is the qsys
+  # system + output base name; `vendor: altera` routes through the soc_backend
+  # seam (generate_hps_platform) → hps_preset, emitting the hps-handoff.
+  #
+  # The rr-owned qsys-script ALSO instantiates the Reset Release Intel FPGA IP
+  # (intel_user_rst_clkgate, "Reset Release IP") inside this system and exports
+  # its `ninit_done` to the board top (RTL-P3.682c). Agilex 5 requires it for a
+  # successful functional configuration (else Critical Warning 20759 / dead
+  # fabric); it is part of the rr-generated HPS platform, not a hand-instanced
+  # fabric IP. The top gates user logic on the exported ninit_done.
+  hps:
+    system: hps_subsys
+    vendor: altera
+
+ips:
+  # ── Agilex 5 hard processor system (the PS8/PS7 analog) ──
+  # Vendor IP, type intel_agilex_5_soc. Config = harvested DE25 GHRD
+  # agilex_hps.ip facts, but with the FPGA↔HPS MPFE bridges DISABLED for this
+  # minimal heartbeat milestone (see below). Boot from SD, EMAC0 RGMII.
+  - name: hps
+    type: intel_agilex_5_soc
+    vendor: altera
+    # version is a TOOL fact (tracks the installed Quartus), not a board fact.
+    # Quartus Pro 25.3 (this bench) provides intel_agilex_5_soc 13.0.0; the GHRD
+    # was authored on 25.1 (9.0.0), which 25.3 rejects. Omit to let rr default
+    # to the installed version (sdk/engine/hps_preset HPS_COMPONENT_VERSION).
+    version: "13.0.0"
+    config:
+      # ── FROZEN golden HPS .ip (RTL-P3.722 Option A — the silent-boot fix) ──
+      # DDR-P3.29, root-caused by DDR-T2.19's differential diagnosis: this
+      # example lacked hps_frozen while the sibling de25_agilex5_ddr_validator
+      # had it. The default add_instance flow black-boxes the Agilex 5 HPS as a
+      # Generic Component in standalone pre-synth generation, so the IO48
+      # pin-mux QIP (UART1:TX / SDMMC / EMAC0 → physical pins) NEVER builds →
+      # SPL console TX routed nowhere → 0 bytes on UART1, silent boot. Setting
+      # hps_frozen makes rr add the GUI-FROZEN golden agilex_hps.ip by FILE
+      # (add_component) — the frozen .ip carries the full IO48 pin-mux baked
+      # in, and the hps_io conduit (48 physical HPS pins) is re-exported at the
+      # hps_subsys top. See the sibling's ip.yml for the full provenance
+      # (validated v9.0.0-on-Quartus-Pro-25.3, RTL-P3.722/RTL-P3.733).
+      hps_frozen: true
+      boot_device: SDMMC          # SDMMC_Mode 4-bit, SDMMC_PinMuxing IO
+      sdmmc_mode: "4-bit"
+      uart_mode: "No_flow_control"  # UART1 console (UART0 unused in GHRD)
+      emac0_mode: "RGMII_with_MDIO"
+      emac0_gtx_clk_mhz: 125.0
+      h2f_width: 128              # HPS→FPGA AXI (full-rate, not used here)
+      lwh2f_width: 32             # lightweight HPS→FPGA AXI (CSR fabric)
+      # *** MPFE FPGA↔HPS bridges DISABLED for the heartbeat smoke (RTL-P3.682e). ***
+      # On the Agilex 5 HPS the *_data_width param IS the per-interface enable
+      # (GHRD label "Enable/Data Width"): a NON-zero width exposes the MPFE port,
+      # and a flat HPS system that leaves it unconnected fails synthesis —
+      # "Error 129015: F2SDRAM_RDATA/F2SOC_RDATA … not legally connected" /
+      # "Error 24265: interface f2sdram/fpga2hps is not connected". This is a
+      # heartbeat smoke (no DDR datapath), so both the f2sdram (FPGA→HPS-DDR) and
+      # the f2s/fpga2hps (coherent) interfaces are DISABLED with width 0. The full
+      # datapath (256-bit ACE5-Lite f2sdram, connected) is the sibling
+      # de25_agilex5_ddr_validator, which wires the bridge into the BIST.
+      f2sdram_width: 0            # 0 = f2sdram (FPGA→HPS-DDR) interface DISABLED
+      f2s_width: 0               # 0 = f2s/fpga2hps (coherent) interface DISABLED
+      f2sdram_mode: "ace5lite"
+      f2sdram_address_width: 32
+      eosc1_clk_mhz: 25.0
+      f2h_free_clk_mhz: 125
+
+  # NOTE: no fabric IPs are declared for the heartbeat smoke. The f2sdram AXI
+  # bridge adapter and the lwh2f led_pio CSR both ride the FPGA↔HPS MPFE bridges
+  # (now disabled above) — they belong to the full-datapath sibling example
+  # (de25_agilex5_ddr_validator), not this HPS-platform-bring-up milestone. The
+  # heartbeat LED is driven by plain fabric logic in src/top_de25_hps_smoke.vhd
+  # (a CLOCK2_50 counter gated by the rr-exported ninit_done), so it needs no PIO.
+  # The Reset Release IP is added by rr inside the generated hps_subsys, not here.

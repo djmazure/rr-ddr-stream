@@ -1,0 +1,95 @@
+# Synthesis smoke target — Intel / Quartus / ddr_stream_avmm TOP.
+#
+# RR--P3.5: dual-vendor `rr synth` smoke gate. Paired with
+# targets/vivado_smoke.yml (Xilinx / Vivado / ddr_stream_axi).
+# Verification harness for:
+#   - RR--P3.3 — vendor-gated xpm source split (xpm_body files
+#     INTENTIONALLY excluded; this target proves the wrapper analyses
+#     clean on Quartus with no `library xpm` leak).
+#   - DDR-P3.39 — fixed-width `ddr_base_addr_g` vector. This target
+#     re-exercises the Quartus 23.1 Std generic-on-generic trap while retaining
+#     the complete unsigned 32-bit address domain.
+#
+# Use:
+#   rr target set quartus_smoke && rr synth run
+#
+# Part: Arria 10 GX 10AX115S2F45I1SG — same SKU as the
+# arria10_rea_demo example. The IP is synth-only at this stage
+# (no bitstream, no board pins, no SDC). DDR4 hardware is not
+# required — rr_ddr_stream exports an AVMM-master interface; what
+# attaches to it is downstream of this smoke gate.
+#
+# Quartus tool-version pin matches the consumer's bring-up
+# environment (NIK-P2.46 family) — adjust if the local Quartus
+# install is a different SKU/version.
+
+project:
+  name: rr_ddr_stream_quartus_smoke
+  top_module: ddr_stream_avmm
+  output_dir: out/quartus_smoke
+
+hardware:
+  vendor: intel
+  part: "10AX115S2F45I1SG"
+  language: vhdl
+  platform: default
+
+build_options:
+  tool_version: "23.1std"
+  # RR--P3.6: synth-verify the 32/512 width combo on Quartus.
+  generics:
+    user_data_width_g: 32
+    ddr_data_width_g:  512
+
+# Explicit source list — RR--P3.3 xpm_body files INTENTIONALLY OMITTED.
+# Quartus rejects `library xpm; use xpm.vcomponents.all;` at analyse
+# time even when the entity is never instantiated. fifo_impl_g="olo"
+# (the rr_fifo_* wrappers' default) keeps the GEN_XPM branch pruned;
+# the matching `entity work.<name>_xpm_body` reference resolves at
+# elab time only when fifo_impl_g="xpm" is selected (which this
+# target never does).
+sources:
+  syn:
+    - rtl/ddr_stream_pkg.vhd
+    - rtl/support/functions_pkg.vhd
+    - rtl/support/ddr_sync_cdc.vhd
+    - rtl/support/skid_buffer.vhd
+    # olo base deps (open-logic).
+    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_array.vhd
+    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_math.vhd
+    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_logic.vhd
+    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_string.vhd
+    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_attribute.vhd
+    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_cc_bits.vhd
+    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_cc_reset.vhd
+    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_ram_sdp.vhd
+    - libs/open-logic/olo_base_fifo_sync/src/base/vhdl/olo_base_fifo_sync.vhd
+    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_fifo_async.vhd
+    - libs/open-logic/olo_base_wconv_n2xn/src/base/vhdl/olo_base_wconv_n2xn.vhd
+    - libs/open-logic/olo_base_wconv_xn2n/src/base/vhdl/olo_base_wconv_xn2n.vhd
+    # Intel stubs for the xpm_body entities — same port/generic
+    # shape as the Xilinx-only rtl/support/xilinx/ counterparts, but
+    # NOP architecture (no `library xpm`). Required because Quartus
+    # elab-time entity binding checks reach into the GEN_XPM branch
+    # of rr_fifo_sync / rr_fifo_async_mixed even when the generate
+    # condition is statically false.
+    - rtl/support/intel/rr_fifo_sync_xpm_body_stub.vhd
+    - rtl/support/intel/rr_fifo_async_mixed_xpm_body_stub.vhd
+    # vendor-neutral wrappers (delegate to the Intel stubs above).
+    - rtl/support/rr_fifo_sync.vhd
+    - rtl/support/rr_fifo_async_mixed.vhd
+    # bus-agnostic + AVMM backend.
+    - rtl/ddr_fifo_intf.vhd
+    - rtl/ptr_mgr.vhd
+    - rtl/burstw_setter.vhd
+    - rtl/burstr_setter.vhd
+    - rtl/avmm/avmm_w.vhd
+    - rtl/avmm/avmm_r.vhd
+    - rtl/avmm/uploader_avmm.vhd
+    - rtl/avmm/downloader_avmm.vhd
+    - rtl/ddr_stream_avmm.vhd
+
+paths:
+  sources:
+    - rtl
+    - libs

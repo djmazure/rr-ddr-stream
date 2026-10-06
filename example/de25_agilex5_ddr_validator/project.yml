@@ -1,0 +1,221 @@
+# DE25-Standard (Agilex 5 SoC) DDR validator — Linux-on-HPS twin of
+# example/zybo_z7_20_ddr_validator (the Zynq-7 original).
+#
+# *** SKELETON — DOES NOT BUILD YET. Blocked on two rr gaps: ***
+#   RTL-P3.681  rr linux Altera/Agilex 5 HPS backend (SPL→ATF BL31→U-Boot→linux-socfpga)
+#   RTL-P3.682  Agilex 5 HPS platform/BD (h2f/f2h AXI bridges, HPS DDR) — PS7/PS8 analog
+# Until both land, this descriptor records the INTENT + the 1:1 mapping from the
+# Zybo example; the fields marked (GAP) use capabilities rr doesn't have yet.
+#
+# Architecture (= the Zybo design, PS→HPS): the PL BIST writes a counter pattern
+# through ddr_stream_axi into HPS DDR via the f2h AXI bridge, reads it back and
+# compares IN FABRIC (payload never hits the CPU → no data-path cache surface);
+# Linux on the HPS A55/A76 drives the AXI-Lite CSR via the h2f bridge and reads
+# the verdict. Basic landing = HPS DDR via f2h. Fabric-DDR4 EMIF is a deferred
+# follow-up (own ticket) per the agreed plan.
+#
+# Reusable as-is from the Zybo example (vendor-neutral): src/ddr_validator_csr.vhd,
+# src/ddr_validator_bist.vhd, sw/linux/ddr_validator.c. New here: the HPS-bridge
+# top (vs the PS7 AXI-HP/GP top) + the socfpga Linux build.
+
+project:
+  name: rr_ddr_stream_de25_agilex5_ddr_validator
+  top_module: top_de25_ddr_validator        # TODO Phase B: HPS-bridge top (f2h/h2f) — analog of top_zybo_z7_20_ddr_validator
+auto_sources: true
+
+hardware:
+  vendor: altera
+  part: "A5ED013BB32AE4SCS"
+  language: vhdl
+  platform: de25-standard                   # boards/de25-standard pinout (437 pins, vendor-seed)
+  edition: pro
+  tool_path: /opt/altera_pro/25.3
+  # hps_hooks: [tcl_hooks/hps_config.tcl]    # (GAP RTL-P3.682) Altera analog of ps7_hooks
+
+paths:
+  sources:
+    - src
+    - libs
+    - debug/rea        # REA bring-up probe RTL (assigned to lib rr below) — RTL-P3.739
+  libraries:
+    rr:
+      - libs/local/ddr_stream_axi/rtl/ddr_stream_pkg.vhd
+      - libs/local/ddr_stream_axi/rtl/support/functions_pkg.vhd
+  # REA (RouteRTL Embedded Analyzer) bring-up probe RTL lives in debug/rea (added
+  # to paths.sources above). It is NOT library-overridden — the files cross-
+  # reference each other via `library work` and the top instantiates them as
+  # `work.rr_rea_intel`, so autodiscovery keeps all 8 + the top consistently in
+  # `work` (vendored point-in-time from routertl ip/routertl/rea/rtl; RTL-P3.739).
+
+packages:
+  # The open-logic packages ship no routertl ip.yml, so each is locked into a
+  # library named after the package (olo_base_fifo_sync, …). But the IP source
+  # references them as `library olo; use olo.olo_base_*` — they all belong in
+  # ONE shared `olo` library. Override per-package (RTL-P2.656) so the lock —
+  # and the lock-derived .routertl_cache/libraries.json the Altera gen_project
+  # reads — attribute every olo file to library `olo`. (The autodiscovery
+  # resolver already infers `olo` for build_env.tcl's g_libraries via the
+  # consumer's `library olo` clause, RTL-P2.646; this aligns the lock path.)
+  open-logic/olo_base_fifo_sync:  {version: ^4.4.1, library: olo}
+  open-logic/olo_base_fifo_async: {version: ^4.4.1, library: olo}
+  open-logic/olo_base_wconv_n2xn: {version: ^4.4.1, library: olo}
+  open-logic/olo_base_wconv_xn2n: {version: ^4.4.1, library: olo}
+  local/ddr_stream_axi: local
+
+linting:
+  profile: esa-vhdl-baseline-provisional
+
+# (GAP RTL-P3.682) HPS block design — Altera analog of the Zybo's gen_bd.tcl.
+# Configures the Agilex 5 HPS: f2h AXI (→ HPS DDR), h2f/lwh2f AXI (→ fabric CSR),
+# HPS DDR EMIF, clocks/resets, + the HPS handoff the SPL consumes.
+# tcl_hooks:
+#   gen_project:
+#     - tcl_hooks/gen_hps_bd.tcl
+
+# Altera/Agilex 5 HPS Linux. The vendor DEFAULTS — first_stage: uboot-spl,
+# uboot/kernel repos (altera-opensource/u-boot-socfpga + linux-socfpga),
+# atf_repo (ARM-software/arm-trusted-firmware, BL31), hardware_handoff: hps-handoff
+# — come from the `altera` SocLinuxProfile in the RTL-P3.684 SoC seam
+# (routertl sdk/engine/soc_backend.py), so we DON'T duplicate them here.
+# That profile is registered with implemented=False / ticket=RTL-P3.681; until
+# CHILD-1 (RTL-P3.681) flips it true + wires the SPL→ATF→U-Boot→kernel steps,
+# `rr linux` raises SocBackendNotImplementedError for vendor=altera.
+linux:
+  board: de25-standard
+  # DDR-P3.20: release the HPS→FPGA bridges in the generated socfpga BOOTCMD so
+  # the booted Linux reaches the validator CSR at 0x20000000 over lwh2f. The NoC
+  # firewall is opened in SPL by socfpga-secreg, but the bridges themselves come
+  # out of POR held in reset (rstmgr brgmodrst) → a CSR poke aborts without this.
+  # `rr linux bootscr` folds `bridge enable` into the BOOTCMD (load Image+DTB →
+  # bridge enable → booti). No hand-rolled boot.txt: the socfpga backend
+  # regenerates boot.scr from socfpga_bootcmd and IGNORES linux.boot_script
+  # (RTL-P3.681), so the boot script must be declarative here.
+  # VALIDATED on DE25 silicon 2026-06-09 (bridge enable → CSR IDENT 0x0DD50200).
+  hps_fpga_bridges: all
+  sdcard:
+    # fpga-first: this design is built FPGA-config-first (proven 2026-06-09 —
+    # `quartus_pfg -o hps=ON` fails Error 19921 "HPS configuration order is not
+    # HPS first"), so there is NO core .rbf and U-Boot must NOT `fpga load`. The
+    # SPL-embedded .sof configures the fabric; the BOOTCMD just loads Image+DTB,
+    # enables bridges, and booti's. Self-contained no-JTAG fabric delivery for
+    # this fpga-first design = flashing the .sof to QSPI (separate ticket); today
+    # the validator fabric is JTAG-loaded before boot.
+    config_order: fpga-first
+  # DE25 console = HPS UART1 (serial@10c02100, ttyS1). The DE25-Standard routes
+  # ONLY UART1 to the USB-serial bridge (/dev/ttyUSB0); UART0 (0x10c02000, the
+  # SoCDK default = ttyS0) is unused in the GHRD. This single bootargs string is
+  # the SOLE source of truth for ALL FOUR console seams — rr derives each from
+  # it (the cmdline + its mmio32 base), no hand-patched vendor source:
+  #   • kernel-DTB chosen        — `rr linux dtb`   (RTL-P2.674)
+  #   • U-Boot default CONFIG_BOOTARGS — `rr linux uboot` (RTL-P2.683)
+  #   • ATF BL31/BL2 console     — `rr linux uboot`  (RTL-P3.716)
+  #   • SPL/U-Boot-proper console (serial0 alias + stdout-path + uart enable)
+  #                              — `rr linux uboot`  (RTL-P3.718)
+  # `console=ttyS1` is the bench-proven main console (the shell came up on it);
+  # the `mmio32,0x10c02100` token drives the DTB stdout-path/alias retarget + the
+  # ATF/SPL/U-Boot UART selection. Image stays console-agnostic (not rebuilt).
+  # nosmp matches the Intel GSRD bring-up default for Agilex 5 (A55+A76 cluster).
+  # console=tty0 (= the current fbcon VT) added FIRST so the kernel boot log
+  # renders live on the LCD during boot; ttyS1 stays LAST so /dev/console (the
+  # interactive shell) remains on the USB-serial UART (DE25 LCD bring-up).
+  #
+  # mem=512M (DE25 FPGA→Eth demo, Stage B): the board's only HPS DDR is
+  # 0x80000000-0xbfffffff (1 GiB). The PL BIST writes its counter pattern into
+  # HPS DDR via the f2h bridge at a CPU-physical base; if Linux owns the whole
+  # range, that write corrupts the kernel. Clamping Linux to the low 512 MiB
+  # (0x80000000-0x9fffffff) frees 0xa0000000-0xbfffffff for the fabric — the
+  # standard SoC-FPGA shared-DDR carve. The validator BIST is pointed at
+  # 0xa0000000 (WR_BASE/RD_BASE CSRs), and userspace reads that window back via
+  # /dev/mem. (A reserved-memory no-map node, anticipated in system_memory_map.yml,
+  # is the production-grade successor; mem= is the simplest permanent split.)
+  # boot.scr's `setenv bootargs` is the line U-Boot actually applies, so this
+  # MUST be regenerated (`rr linux bootscr`) — patching only the dtb won't take.
+  bootargs: "console=tty0 console=ttyS1,115200 earlycon=uart8250,mmio32,0x10c02100,115200n8 root=/dev/ram0 rw init=/sbin/init ramdisk_size=10000000 panic=-1 nosmp kvm-arm.mode=nvhe mem=512M"
+  # RTL-P2.682/P2.684: the golden DE25 HPS config leaves QSPI + NAND dark (SD-boot
+  # board), so probing them faults — the kernel's cqspi probe panics ("Attempted
+  # to kill init") and U-Boot-proper takes a sync external abort. rr disables both
+  # dead nodes in BOTH the kernel board DTB (P2.682) AND the U-Boot control DTB
+  # (P2.684, &{/soc/<node>} status=disabled appended to the board -u-boot.dtsi).
+  dtb_disable_nodes:
+    - spi@108d2000
+    - nand@10b80000
+  # LCD bring-up (Path B): the 128x64 ST7567 panel hangs off HPS SPIM0
+  # (spi@10da4000, disabled in the SoCDK base DTB) on chip-select 0. Enable the
+  # bus and expose a userspace spidev so /usr/bin/de25_lcd_kmsg can open
+  # /dev/spidev0.0. The panel's D/C line is HPS GPIO porta-11 (= /dev/gpiochip0
+  # line 11) — the SoCDK reference `leds` node claims that same porta-11 for
+  # hps_led0, so disable it or the gpio-leds driver holds the line and the app's
+  # GPIOHANDLE request returns EBUSY. (D/C, RST, BK are driven from userspace via
+  # /dev/gpiochip0; no DT gpio phandles needed — dt_nodes can't express phandles
+  # yet, see the field-feedback ticket.)
+  dt_nodes:
+    - path: /soc@0/spi@10da4000
+      properties:
+        status: "okay"
+    - path: /soc@0/spi@10da4000/lcd@0
+      properties:
+        compatible: "UltraChip,uc1701"  # fb_uc1701 (ST7565/ST7567/UC1701 family) fbtft driver
+        reg: 0                          # chip-select 0 = HPS_LCM_SPIM_SS (ss0_n)
+        spi-max-frequency: 2500000
+        buswidth: 8
+        width: 128                      # panel is 128 wide (driver defaults to UC1701's 102)
+        height: 64                      # 8 pages → fbcon 16x8 chars
+        # GPIOs are on gpio1/portb (gpio-controller phandle 0x09=9): D/C=line11
+        # (active-high), RST=line10 (active-low -> flag 1), BK/backlight=line18.
+        # dt_nodes can't emit &label phandle refs (RTL-P3.797 companion gap), so the
+        # phandle cell is the raw numeric value 9 — VERIFY against the built dtb each
+        # build (portb's gpio-controller phandle must still be 9).
+        dc-gpios: [9, 11, 0]
+        reset-gpios: [9, 10, 1]
+        led-gpios: [9, 18, 0]
+        rotate: 0
+    - path: /leds
+      properties:
+        status: "disabled"
+    # HPS Ethernet (FPGA -> HPS DDR -> Eth -> Host demo). The DE25-Standard wires
+    # its RJ45 to HPS EMAC0 (boards/de25-standard: hps_io_enable lists EMAC0:* +
+    # MDIO0:*; pinout.yml has the full HPS_ENET_* RGMII bus). But the Intel SoCDK
+    # base DTB ships EMAC0 (ethernet@10810000) status=disabled and EMAC2
+    # (ethernet@10830000) status=okay — EMAC2 is NOT routed on the DE25. So flip
+    # them: enable EMAC0 (becomes eth0 via the ethernet0 alias), disable the dead
+    # EMAC2 so there's no phantom interface hunting a PHY that isn't there. The PHY
+    # is at MDIO addr 0 with no explicit compatible -> generic phylib reads the ID
+    # and binds the right built-in driver (MICREL/REALTEK both =y). phy-mode stays
+    # "rgmii"; if the link won't come up on silicon, the first thing to try is
+    # "rgmii-id" (board-side RGMII clock-delay). (DE25 Ethernet bring-up.)
+    - path: /soc@0/ethernet@10810000
+      properties:
+        status: "okay"
+        # On-silicon MDIO scan (devmem, register-level) found the DE25 PHY is a
+        # Micrel/Microchip KSZ9031 (PHYID1=0x0022, PHYID2=0x1622). KSZ9031 with no
+        # PCB/MAC RGMII skew programmed needs the PHY to add both clock delays, so
+        # override the SoCDK base "rgmii" -> "rgmii-id". (Validate by link-up; if a
+        # link comes up but traffic is corrupt, revisit skews / try plain rgmii.)
+        phy-mode: "rgmii-id"
+    # The DE25's KSZ9031 is strapped to MDIO address 1, NOT 0. The SoCDK base DTB
+    # declares ethernet-phy@0 reg=0, so the kernel probed addr 0 and reported
+    # "MDIO device at address 0 is missing" — eth0 existed but never got a PHY.
+    # Proven on silicon: a register-level C22 read found PHYID 0022:1622 at addr 1
+    # (and nothing at 0). Override the phy node's reg to 1 (the node keeps its
+    # @0 unit-name — cosmetic; the kernel binds by the `reg` property). (DE25 Eth.)
+    - path: /soc@0/ethernet@10810000/mdio0/ethernet-phy@0
+      properties:
+        reg: 1
+    - path: /soc@0/ethernet@10830000
+      properties:
+        status: "disabled"
+  kernel_config_fragments:
+    - sw/linux/lcd_spi.config-fragment
+  # fb_uc1701 hardcodes its 102-wide UC1701 default in write_vmem; the DE25 panel
+  # is 128, so patch the driver to honour the runtime (DT) width. Idempotent
+  # applier so a clean clone reproduces it. (DE25 LCD bring-up.)
+  kernel_patch_script: sw/linux/patches/apply.sh
+  apps:
+    - name: ddr_validator
+      source: sw/linux/ddr_validator.c        # reused verbatim from the Zybo example
+      install: /usr/bin/ddr_validator
+    - name: de25_lcd_kmsg
+      source: sw/linux/de25_lcd_kmsg.c         # ST7567 128x64 LCD <- /dev/kmsg scroller
+      install: /usr/bin/de25_lcd_kmsg
+
+memory_map: sw/linux/system_memory_map.yml

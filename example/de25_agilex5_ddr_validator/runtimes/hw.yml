@@ -1,0 +1,48 @@
+# runtimes/hw.yml — rr.hw.contract/v1 BIST recipe for the DE25 Agilex 5 DDR validator.
+#
+# SPDX-FileCopyrightText: 2026 Daniel J. Mazure
+# SPDX-License-Identifier: MIT
+
+schema: "rr.hw.contract/v1"
+version: 0.1
+
+requirements:
+  - id: "BIST-DDR-001"
+    description: >-
+      DDR fabric BIST: the roundtrip scenario completes with STATUS done+pass
+      and zero mismatches on the 0x2000_0000 validator CSR window.
+    expected_outcome: "pass"
+    target:
+      board: "de25-standard"
+    preconditions:
+      - name: "bitstream_loaded"
+        via: "rr hw bist de25-standard --bitstream ddr_validator.sof (fabric already configured before CSR probe)"
+    steps:
+      - {idx: 1, kind: "peek",     addr: "0x2000003c", expected: "0x0dd50200",
+         comment: "IDENT magic — confirm the validator CSR is alive before kicking a run"}
+      - {idx: 2, kind: "poke",     addr: "0x20000008", value: "0x00000000",
+         comment: "SCENARIO = 0 (roundtrip)"}
+      - {idx: 3, kind: "poke",     addr: "0x2000000c", value: "0x00000100",
+         comment: "N_WORDS = 256, the silicon-validated shared-DDR smoke size"}
+      - {idx: 4, kind: "poke",     addr: "0x20000028", value: "0xa0000000",
+         comment: "WR_BASE = carved HPS DDR window"}
+      - {idx: 5, kind: "poke",     addr: "0x2000002c", value: "0xa0000000",
+         comment: "RD_BASE = carved HPS DDR window"}
+      - {idx: 6, kind: "poke",     addr: "0x20000030", value: "0x00000003",
+         comment: "BASE_LOAD latch wr+rd base CSRs"}
+      - {idx: 7, kind: "poke",     addr: "0x20000000", value: "0x00000001",
+         comment: "CTRL.start (write-1-to-pulse) — kick the run"}
+      - {idx: 8, kind: "wait_for", addr: "0x20000004", mask: "0x00000002",
+         expected: "0x00000002", timeout_s: 15.0,
+         comment: "STATUS.done rises when the roundtrip finishes"}
+      - {idx: 9, kind: "peek",     addr: "0x20000004", expected: "0x00000036",
+         comment: "STATUS == done|pass|write_idle|read_idle (0x36); running=0, fail=0"}
+      - {idx: 10, kind: "peek",    addr: "0x20000010", expected: "0x00000000",
+         comment: "ERROR_COUNT == 0 — no word mismatches this run"}
+    assertions:
+      - {id: "A1", expr: "step[1].observed == step[1].expected"}
+      - {id: "A2", expr: "step[8].satisfied == true"}
+      - {id: "A3", expr: "step[9].observed == step[9].expected"}
+      - {id: "A4", expr: "step[10].observed == step[10].expected"}
+    evidence_required:
+      - console_log

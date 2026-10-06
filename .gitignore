@@ -1,0 +1,87 @@
+# Build artefacts
+*.o
+*.work
+work/
+build/
+__pycache__/
+*.pyc
+*.vcd
+*.fst
+*.ghw
+.cache/
+.routertl/
+sim_build/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# RouteRTL engine artefacts
+.routertl_cache/
+.routertl/
+**/sim/cocotb/logs/
+**/sim/cocotb/tests/*_test.log
+**/sim/work/
+**/sim/cocotb/tests/__pycache__/
+
+# RouteRTL pkg-manager artefacts
+libs/                          # registry-installed packages, populated by `rr pkg add`
+build_env.mk                   # generated from project.yml
+build_env.tcl                  # generated from project.yml
+.deps.ok                       # rr pkg dependency-resolution marker
+sim/lint_pkg.log               # `rr pkg add` post-install lint output
+**/sim/waves/
+
+# RouteRTL pkg-manager artefacts (per-machine, regen on `rr pkg install`)
+libs/
+build_env.mk
+build_env.tcl
+.deps.ok
+sim/lint_pkg.log
+**/sim/waves/
+**/sim/cocotb/logs/
+
+# RouteRTL lint findings (regen on every `rr lint --profile`)
+**/artifacts/lint/
+
+# RouteRTL generated outputs + locks (regen by `rr`; never committed)
+/out/
+/routertl.lock
+**/sim/results/
+**/sim/lint.log
+**/sim/lint.status
+**/sim/cocotb/tests/*.log
+
+# JVM / vendor-tool crash dumps (any prefix, e.g. andbg_hs_err_pid*)
+*hs_err_pid*.log
+# qsys/HPS sim trees under examples (regen by `rr`)
+example/*/sim/
+
+# rr per-example build/job markers + Vivado crash journals (regen every run)
+**/.rr_pending_job
+/example/*/BUILD_INFO.txt
+**/vivado*.jou
+**/vivado*.log
+vivado_pid*.zip
+
+# rr linux build outputs / source clones (regenerate via `rr linux ...`)
+**/sw/linux/out/
+**/sw/linux/src/
+# large rr-linux build archive dumps -- never committed (repo-bloat risk)
+**/sw/linux.zip
+
+# rr.hw.contract BIST run evidence (timestamped per-invocation, unbounded
+# growth -- regen via `rr hw run`; the contract in runtimes/hw.yml is the
+# source of truth, not the replay logs)
+/example/*/runs/
+
+# RouteWave layout state files (per-user, not portable)
+imgui.ini
+routewave_window.ini
+
+# >>> routertl hooks >>>
+.routertl/
+# <<< routertl hooks <<<

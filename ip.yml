@@ -1,0 +1,198 @@
+# rr_ddr_stream — RouteRTL DDR-backed ring-buffered streaming-DMA primitive
+#
+# Carved out of rr-vfifo 2026-05-15 (decision rr-vfifo D.1, plan:
+# warm-dancing-stardust). rr-ddr-stream is the bus-master-and-pointer-math
+# substrate; rr-vfifo composes this with a cache arbiter (mux_ep_ddr) to
+# expose a low-latency hybrid Virtual FIFO surface.
+#
+# Independently useful for capture, logging, burst-store, and any other
+# ring-buffered-DDR-DMA use case.
+#
+# Three TOP entities (one IP, three backends):
+#   - ddr_stream_axi  : AXI4 master  (Xilinx targets, MIG / DDR4 controllers)
+#   - ddr_stream_avmm : Avalon-MM    (Intel  targets, EMIF / Hard Memory Controller)
+#   - ddr_stream_fic  : AXI4 master  (Microchip targets, PolarFire SoC MSS FIC)
+# The bus-agnostic policy entities (ptr_mgr, burst*_setter, ddr_fifo_intf,
+# skid_buffer, CDC primitives) are shared. VHDL elaboration prunes unused
+# backend entities at synth, so no LUT cost for single-backend users.
+
+# Unified ip.yml shape (RTL-P3.189 / D.58): identity at the ROOT (top-level
+# name/namespace/version), so `rr pkg publish` reads them directly.
+name: rr_ddr_stream
+namespace: routertl
+library: rr
+language: vhdl
+license: MIT
+# 0.3.0 (DDR-P2.4, 2026-06-01): software-managed ring read pointer
+# (csr_rd_ptr_addr_i / csr_rd_ptr_load_i) re-instates the SPSC drain for
+# write-only integrations (enable_read_plane_g=false). Back-compatible —
+# new ports default to 0, behaviour unchanged until a consumer advances it.
+# DDR-P2.20 (2026-09-19) ships the Microchip/Libero SmartTime dialect of the
+# scoped CDC constraints (constraints/ddr_stream_cdc_scoped_microchip.sdc) for
+# the ddr_stream_fic (PolarFire SoC) backend, plus the pfsoc_disco_ddr_validator
+# packaging peg. It does NOT bump the version: the file is hand-vendored into the
+# consumer's own sources.sdc (it is deliberately absent from build.sources.sdc,
+# and `rr pkg publish`'s PACKAGE_SDC_FILES is intel/altera-only), so publishing
+# is not required to plant it — and 0.3.3 is RESERVED for the DDR-T1.3 STA /
+# 16-boot silicon blessing (docs/internal/DDR_T1_3_SDC_CDC_AUDIT.md), which must
+# not be pre-empted by a desk-only constraint add.
+# 0.3.3 (2026-10-03) is that blessing: DDR-T1.3 landed b65f92b with 16/16
+# interleaved DE25 cold boots (COMMIT tracks WRITE, capture decodes).
+version: "0.3.3"
+
+hdl:
+  # AXI is the v1 TOP. AVMM ships alongside it (DDR-P3.1, 2026-05-15)
+  # — single IP, two backend TOPs. top_module here is the AXI build
+  # default; consumers select the AVMM TOP via target overrides or by
+  # instantiating ddr_stream_avmm directly.
+  top_module: ddr_stream_axi
+  top_sim:    tb_ddr_stream_axi
+  # DDR-P3.23: both backend TOPs packaged together — the resolver unions
+  # each top's closure (RTL-P3.822 multi-top). top_module stays the AXI
+  # build default for `rr synth run` standalone.
+  tops:
+    - ddr_stream_axi
+    - ddr_stream_avmm
+    - ddr_stream_fic
+
+paths:
+  sources: rtl
+
+# DDR-P3.23 / RTL-P2.714: resolver-first source resolution (see synthesis: below).
+auto_sources: true
+
+synthesis:
+  mode: rtl
+  # DDR-P3.23 / RTL-P2.714: resolver-first. Sources come from
+  # build.auto_sources — the dependency resolver walks hdl.tops
+  # [ddr_stream_axi, ddr_stream_avmm, ddr_stream_fic] over paths.sources (rtl/) plus the
+  # olo/enclustra libraries (build.ips, resolved via ip.lock to libs/) and
+  # orders the closure. The old hand-listed `sources:` was a drift-prone
+  # duplicate (RTL-P2.635: it had omitted rr_fifo_async_mixed, leaving a
+  # hollow IP for consumers honouring it) and carried bloat (rr_fifo_async —
+  # never instantiated; the design uses rr_fifo_async_mixed + rr_fifo_sync).
+  # DDR-P3.33: deleted the never-instantiated event_synchronizer + mux_cdc_er,
+  # which shadowed the SDK src/units copies (name collisions). sources_per_vendor
+  # (the xpm bodies) is still vendor-gated below.
+
+  # RR--P3.3 (2026-05-16): per-vendor source extensions, honoured by the
+  # SDK via routertl RTL-P3.512 (per-vendor source selection schema +
+  # resolver). The consumer's hardware.vendor selects EXACTLY ONE of these
+  # body sets; the others are excluded from that consumer's compile set so
+  # a non-Xilinx build never sees the file-scope `library xpm` decl.
+  #
+  #  - xilinx : the real xpm_fifo_* wrappers (file-scope `library xpm`).
+  #  - intel  : pure entity-declaration STUBs (no xpm) so Quartus can
+  #             complete its static entity-binding check on the pruned
+  #             GEN_XPM branch of each rr_fifo_* wrapper when fifo_impl_g=
+  #             "olo" (Quartus statically analyses the false generate). A
+  #             "xpm"-on-Intel mis-config trips the stub's elab assert.
+  #
+  # The sim sweep still picks up the xilinx bodies via
+  # `build.simulation.sources:` below so both olo + xpm cocotb lanes stay
+  # green (NVC compiles `library xpm` as an empty/ignored lib).
+  sources_per_vendor:
+    xilinx:
+      - rtl/support/xilinx/rr_fifo_sync_xpm_body.vhd
+      - rtl/support/xilinx/rr_fifo_async_xpm_body.vhd
+      - rtl/support/xilinx/rr_fifo_async_mixed_xpm_body.vhd
+    intel:
+      - rtl/support/intel/rr_fifo_sync_xpm_body_stub.vhd
+      - rtl/support/intel/rr_fifo_async_xpm_body_stub.vhd
+      - rtl/support/intel/rr_fifo_async_mixed_xpm_body_stub.vhd
+    # DDR-T3.3 (2026-06-19): the ecosystem's canonical FPGA vendor is `altera`
+    # (post-rebrand); consumers declare `hardware.vendor: altera`, which did NOT
+    # match the stale `intel` key, so a non-Xilinx consumer fell through to the
+    # xilinx bodies (file-scope `library xpm`) and failed on NVC/Quartus with
+    # `RR_FIFO_*_XPM_BODY not found` once those vendor-gated bodies were dropped.
+    # Alias `altera` to the same pure-stub bodies as `intel` (Altera == Intel
+    # FPGA). `intel` retained for back-compat.
+    altera:
+      - rtl/support/intel/rr_fifo_sync_xpm_body_stub.vhd
+      - rtl/support/intel/rr_fifo_async_xpm_body_stub.vhd
+      - rtl/support/intel/rr_fifo_async_mixed_xpm_body_stub.vhd
+    # DDR-P2.15: Microchip PolarFire SoC targets use the same vendor-neutral stubs
+    microchip:
+      - rtl/support/intel/rr_fifo_sync_xpm_body_stub.vhd
+      - rtl/support/intel/rr_fifo_async_xpm_body_stub.vhd
+      - rtl/support/intel/rr_fifo_async_mixed_xpm_body_stub.vhd
+    microsemi:
+      - rtl/support/intel/rr_fifo_sync_xpm_body_stub.vhd
+      - rtl/support/intel/rr_fifo_async_xpm_body_stub.vhd
+      - rtl/support/intel/rr_fifo_async_mixed_xpm_body_stub.vhd
+
+build:
+  # RTL-P2.636 (2026-05-26): scoped constraints the IP ships to consumers.
+  # Cell-relative CDC timing (RR--P3.8) for the olo async-FIFO + base-addr
+  # crossings inside ddr_stream_axi. `rr pkg` vendors this into the consumer's
+  # libs/ and records it in ip.lock as a scoped_constraint (ref=hdl.top_module);
+  # the build applies it via `read_xdc -ref ddr_stream_axi`, so every get_* is
+  # scoped to the IP instance and resolves regardless of the consumer's clock
+  # names or where it instantiates the IP. Consumer adds ZERO timing XDC.
+  sources:
+    xdc:
+      - constraints/ddr_stream_cdc_scoped.xdc
+    # DDR-P2.10 (2026-07-21): Altera/Quartus twin of the scoped XDC above —
+    # same crossings, translated to Quartus SDC semantics (set_false_path +
+    # set_net_delay -max + set_max_skew per crossing; Quartus has no
+    # -datapath_only). Unlike the XDC it needs NO -ref scoping: every selector
+    # is a full-hierarchy glob that binds only rr_ddr_stream register names,
+    # so applying it globally (SDC_FILE) is safe and correct. The `sdc`
+    # category is understood by routertl's constraints_resolver (RTL-P3.566:
+    # sources.{xdc,sdc}) and the Altera gen_project flow (SDC_FILE). routertl
+    # DOES vendor build.sources.sdc into a consumer's ip.lock scoped_constraints
+    # (RTL-P3.1331) — so a Quartus consumer of this IP picks this file up
+    # automatically. Drift-guarded by tests/test_cdc_xdc_drift.py.
+    sdc:
+      - constraints/ddr_stream_cdc_scoped.sdc
+    # DDR-P2.20 (2026-09-19): the Microchip/Libero SmartTime dialect of the same
+    # scoped CDC crossings lives at constraints/ddr_stream_cdc_scoped_microchip.sdc.
+    # It is DELIBERATELY NOT added to the `sdc:` list above: that list feeds the
+    # IP's OWN standalone synth (default vendor xilinx) AND is vendored wholesale
+    # into consumers' scoped_constraints (RTL-P3.1331 vendors build.sources.sdc) —
+    # but that generic ingest is dialect-BLIND. The Libero `get_cells` syntax is
+    # illegal under Quartus (get_registers) and the Quartus
+    # `get_registers`/`set_net_delay`/`set_max_skew` syntax is illegal under
+    # Libero, so the two SDC dialects MUST NOT be co-applied. Until routertl grows
+    # per-vendor scoped-SDC ingestion, a Microchip consumer hand-vendors this one
+    # file into its own sources.sdc — see example/pfsoc_disco_ddr_validator. All
+    # three dialects (xdc / sdc / microchip.sdc) are drift + fail-open guarded by
+    # tests/test_cdc_xdc_drift.py.
+  simulation:
+    sources:
+      # RR--P3.3: xpm body files included for sim coverage so the
+      # fifo_impl_g="xpm" lane elaborates with `entity work.*_xpm_body`
+      # resolved against a real entity. NVC compiles them with the
+      # rest of the IP source set.
+      - rtl/support/xilinx/rr_fifo_sync_xpm_body.vhd
+      - rtl/support/xilinx/rr_fifo_async_xpm_body.vhd
+      - rtl/support/xilinx/rr_fifo_async_mixed_xpm_body.vhd
+      - sim/tb/wrappers/wrapper_ddr_stream_axi.vhd
+      - sim/tb/wrappers/wrapper_ddr_stream_avmm.vhd
+      - sim/tb/wrappers/wrapper_ddr_stream_fic.vhd
+    test_dir: sim/cocotb/tests
+    simulator: nvc
+    waves:
+      formats: [fst]
+  ips:
+    # Vendor-agnostic FIFO primitives (open-logic). Default impl for
+    # rr_fifo_sync / rr_fifo_async / rr_fifo_async_mixed — Quartus +
+    # Vivado portable. Auto-installed transitively when a consumer
+    # does `rr pkg add rr_ddr_stream`. The wconv pair (n2xn / xn2n)
+    # is needed for the mixed-width upload/download FIFOs inside
+    # ddr_fifo_intf (RR--P3.1, 2026-05-15).
+    - open-logic/olo_base_fifo_sync
+    - open-logic/olo_base_fifo_async
+    - open-logic/olo_base_wconv_n2xn
+    - open-logic/olo_base_wconv_xn2n
+    # Transitive declaration (RR--P3.x, 2026-05-16) for a downstream project's
+    # single-shot install (the SDK doesn't yet recurse into
+    # upstream packages without routertl-compatible ip.yml manifests — see
+    # routertl RTL-P3.510). NB open-logic/olo_base_pkg_math was removed
+    # (DDR-P3.27): it is NOT a standalone registry package — it ships inside
+    # the olo_base_* packages above and resolved to nothing here (publisher
+    # warned 'resolved to NEITHER local nor lock').
+    - enclustra/en_cl_fix_resize
+
+# Per-IP requirements file (boundary-only contracts).
+requirements: requirements.yml

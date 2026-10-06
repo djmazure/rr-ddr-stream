@@ -1,0 +1,4 @@
+# DDR-P3.39 — Quartus Std 23.1 high-base synth smoke.
+# Canonical descriptor lives next to the wrapper:
+includes:
+  - ../example/quartus_std_high_base/project.yml

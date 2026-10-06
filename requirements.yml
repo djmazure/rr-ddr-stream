@@ -1,0 +1,348 @@
+# rr_ddr_stream — Behavioural contract (boundary-only)
+#
+# WHAT ddr_stream_axi promises its consumers, observed at the IP boundary
+# defined by `hdl_file` + `port_contract`. Every REQ here MUST be testable from
+# a cocotb harness that only drives or observes the FLAT wrapper's ports — no
+# whitebox probing of internal sub-modules (ptr_mgr, uploader, burstw_setter,
+# axi4w …). Sub-block invariants live as inline directives in the RTL, not here.
+#
+# ── Mapping rule ─────────────────────────────────────────────────────────
+# Each `id` is referenced by ≥1 cocotb test in sim/cocotb/tests/ via
+# @requires("DDR-REQ-N"). `rr sim coverage-map` enforces the mapping and that
+# the test body references at least one backticked signal named in the desc —
+# so port/signal names are always backticked here.
+#
+# kind: behavioral — positive contract (this MUST happen)
+#       negative   — explicit non-behavior (this MUST NOT happen)
+
+ip: rr_ddr_stream
+version: 0.2
+
+# Contract-check points at the FLAT-AXI wrapper, not the record-typed top
+# entity: the wrapper unfolds t_axi4_h2c_bus / t_axi4_c2h_bus into per-signal
+# ports (M_AXI_AWADDR / M_AXI_AWLEN / …) the master-bundle detector recognises.
+hdl_file: sim/tb/wrappers/wrapper_ddr_stream_axi.vhd
+
+port_contract:
+  slaves: []
+  masters:
+    - { name: M_AXI, protocol: axi4 }
+  scalars:
+    - { name: S_AXIS_DATA,     dir: in,  width: G_USER_DATA_WIDTH }
+    - { name: S_AXIS_VALID,    dir: in,  width: 1 }
+    - { name: S_AXIS_READY,    dir: out, width: 1 }
+    - { name: M_AXIS_DATA,     dir: out, width: G_USER_DATA_WIDTH }
+    - { name: M_AXIS_VALID,    dir: out, width: 1 }
+    - { name: M_AXIS_READY,    dir: in,  width: 1 }
+    - { name: CSR_WR_BASE_ADDR, dir: in, width: G_DDR_ADDR_WIDTH }
+    - { name: CSR_WR_BASE_LOAD, dir: in, width: 1 }
+    - { name: CSR_RD_BASE_ADDR, dir: in, width: G_DDR_ADDR_WIDTH }
+    - { name: CSR_RD_BASE_LOAD, dir: in, width: 1 }
+    - { name: CSR_RD_PTR_ADDR,  dir: in, width: G_DDR_ADDR_WIDTH }
+    - { name: CSR_RD_PTR_LOAD,  dir: in, width: 1 }
+    - { name: WRITE_IDLE,       dir: out, width: 1 }
+    - { name: READ_IDLE,        dir: out, width: 1 }
+    - { name: WR_COMMIT_ADDR,   dir: out, width: G_DDR_ADDR_WIDTH }
+    - { name: DDR_CSR,          dir: out, type: t_fifoCsr }
+  clocks:
+    # NB: `domain`/`role` on clocks were removed in requirements schema v1
+    # (rr ip contract migrate). The sys/ddr split is documented on the
+    # resets below and in the REQ prose; the schema tracks only the names.
+    - { name: CLK_SYS }
+    - { name: CLK_DDR }
+  resets:
+    - { name: RST_SYS, polarity: active_high, domain: sys }
+    - { name: RST_DDR, polarity: active_high, domain: ddr }
+
+parameters:
+  - { name: G_AXI_ID,             default: 0,    desc: "AXI4 master ID written on every AW/AR" }
+  - { name: G_FIFO_DEPTH,         default: 9,    desc: "log2 of front-end FIFO word count (2^9 = 512 words)" }
+  - { name: G_USER_DATA_WIDTH,    default: 32,   desc: "User-facing AXI-Stream data width in bits" }
+  - { name: G_DDR_DATA_WIDTH,     default: 128,  desc: "AXI4 / DDR bus data width in bits" }
+  - { name: G_DDR_ADDR_WIDTH,     default: 32,   desc: "AXI4 / DDR bus address width in bits" }
+  - { name: G_DDR_BASE_ADDR,      default: 0,    desc: "Unsigned 32-bit reset base address; the full 0x00000000..0xffffffff domain is legal" }
+  - { name: G_BUFFER_WIDTH,       default: 31,   desc: "log2 of DRAM-ring byte capacity (2^31 = 2 GiB)" }
+  - { name: G_ENABLE_WRITE_PLANE, default: true, desc: "Elaborate the write (uploader) plane; false ties s_axis_ready low" }
+  - { name: G_ENABLE_READ_PLANE,  default: true, desc: "Elaborate the read (downloader) plane; false ties m_axis_valid low and hands ring drain to the software read pointer (CSR_RD_PTR_*)" }
+
+functional_contract:
+
+  # ── Core stream contract ─────────────────────────────────────────────
+  - id: DDR-REQ-001
+    kind: behavioral
+    desc: >-
+      End-to-end round-trip: N consecutive `S_AXIS_DATA` values accepted on
+      `CLK_SYS` (`S_AXIS_VALID`=1 & `S_AXIS_READY`=1), after the IP commits them
+      to DDR, are returned on `M_AXIS_DATA` (`M_AXIS_VALID`=1) in the same FIFO
+      order regardless of the AXI4 memory model's burst shape or latency. This
+      subsumes "no lost / no duplicate message".
+
+  - id: DDR-REQ-002
+    kind: behavioral
+    desc: >-
+      When the DRAM ring (2^`G_BUFFER_WIDTH` bytes) fills, the IP applies
+      back-pressure (`S_AXIS_READY` deasserts) and further ingress does NOT
+      corrupt previously-committed ring state. Writes resume cleanly once space
+      is freed (a consumer advances the read side).
+
+  # ── M_AXI master AXI4 protocol contract ──────────────────────────────
+  - id: DDR-REQ-200
+    kind: behavioral
+    desc: >-
+      Every write burst drives `M_AXI_AWADDR` equal to the current write-head
+      DRAM address inside the configured ring and `M_AXI_AWSIZE` encoding
+      `G_DDR_DATA_WIDTH`/8 bytes per beat.
+
+  - id: DDR-REQ-203
+    kind: negative
+    desc: >-
+      No write burst on M_AXI crosses a 4 KiB boundary: (`M_AXI_AWADDR` mod
+      4096) + (`M_AXI_AWLEN`+1)*(1<<`M_AXI_AWSIZE`) ≤ 4096 (AMBA AXI4 §A3.4.1).
+    spec:
+      - "AMBA AXI4 (ARM IHI 0022H) §A3.4.1 — a burst must not cross a 4 KiB address boundary"
+
+  - id: DDR-REQ-205
+    kind: behavioral
+    desc: >-
+      INPUT DOMAIN — STATIC BASE ADDRESS. `G_DDR_BASE_ADDR` accepts every
+      unsigned 32-bit value, including the upper half 0x80000000..0xffffffff,
+      and both the AXI and AVMM top-level wrappers elaborate with that value.
+      The generic must not be constrained by the implementation-defined VHDL
+      INTEGER range; a 32-bit-INTEGER tool therefore accepts 0x80000000 as a
+      `G_DDR_BASE_ADDR` even though it rejects that value as an INTEGER.
+
+  - id: DDR-REQ-204
+    kind: negative
+    desc: >-
+      With `G_MAX_BURST_LEN`=16 (the AXI3 / Zynq-7 S_AXI_HP target) no write
+      burst on M_AXI exceeds 16 beats: every accepted `M_AXI_AWLEN` ≤ 15. At the
+      AXI4 default (`G_MAX_BURST_LEN`=256) the ring DOES emit `M_AXI_AWLEN`>15
+      under DDR-cadence back-pressure — that >16-beat region is AXI3-illegal and
+      is exactly what the clamp removes (VFIFO-T2.6 / IDP-T2.5).
+
+  - id: DDR-REQ-206
+    kind: negative
+    desc: >-
+      POLARFIRE SOC FIC BURST CAP CONFORMANCE (DDR-P2.15). On the Microchip
+      backend (`ddr_stream_fic` / `wrapper_ddr_stream_fic`), no write burst on
+      M_AXI exceeds 64 beats (`C_PFSOC_FIC_MAX_BURST`): every accepted
+      `M_AXI_AWLEN` ≤ 63. Under DDR-cadence back-pressure, bursts remain capped
+      to at most 64 beats even when `G_MAX_BURST_LEN` defaults to or is set to
+      256, honours the `C_PFSOC_FIC_MAX_BURST` constant, and prevents AXI3-class
+      illegal burst lengths from reaching the PolarFire SoC FIC target port.
+
+  - id: DDR-REQ-207
+    kind: behavioral
+    desc: >-
+      CORE-SIDE CONTRACT INSTRUMENTATION (DS-T1.13 / DDR-P2.15). The Microchip
+      PolarFire SoC backend exposes the identical core-side contract as the AXI
+      master: write-plane arming deasserts `DDR_CSR` `chip_empty` upon ingress;
+      `WR_COMMIT_ADDR` advances and wraps on ring boundary; `WRITE_IDLE` and
+      `READ_IDLE` signal active status; `VERSION` stamps the IP version;
+      `DBG_RESET_STATUS` reports active chip-select status; and `DDR_CSR`
+      telemetry counters (`fifoCnt`, `fifoFullCnt`, `fifoEmptyCnt`) track ring
+      occupancy and backpressure.
+
+  - id: DDR-REQ-208
+    kind: behavioral
+    desc: >-
+      PRODUCT GEOMETRY WRITE PATH (DS-T1.12 / DDR-P2.14). With write plane
+      enabled and read plane disabled (`G_ENABLE_READ_PLANE`=false), DDR base
+      `G_DDR_BASE_ADDR` in the upper 32-bit address space (≥ 0x8000_0000,
+      specifically 0xA0000000), 256-bit DDR data width (`G_DDR_DATA_WIDTH`=256),
+      burst cap `G_MAX_BURST_LEN`=16, and ring buffer window `G_BUFFER_WIDTH`=28,
+      ingress traffic accepted on `S_AXIS_DATA` (`S_AXIS_VALID`=1 and `S_AXIS_READY`=1)
+      with sniffer cadence (including short bursts, 1-word frames, and 0-word
+      FIFO empty edges) causes the uploader to issue write bursts on `M_AXI`
+      (`M_AXI_AWVALID` asserts with `M_AXI_AWADDR` within [base, base+2^`G_BUFFER_WIDTH`)),
+      `WRITE_IDLE` deasserts during active write operations, and the commit pointer
+      `WR_COMMIT_ADDR` advances past 0 upon write completion.
+
+  - id: DDR-REQ-210
+    kind: behavioral
+    desc: >-
+      The write pointer is a RING: `M_AXI_AWADDR` wraps from the top of the ring
+      window back to the base and never escapes [base, base+2^`G_BUFFER_WIDTH`),
+      sustaining writes across many wraps when the read side keeps freeing space.
+
+  # ── Plane-elision contract (DDR-P1.1) ────────────────────────────────
+  - id: DDR-REQ-400
+    kind: negative
+    desc: >-
+      With `G_ENABLE_READ_PLANE`=false, `M_AXI_ARVALID` never asserts and
+      `M_AXIS_VALID` stays low / `READ_IDLE` stays high for the whole run,
+      regardless of `M_AXIS_READY` or write activity.
+
+  - id: DDR-REQ-401
+    kind: negative
+    desc: >-
+      With `G_ENABLE_WRITE_PLANE`=false, `M_AXI_AWVALID` / `M_AXI_WVALID` never
+      assert and `S_AXIS_READY` stays low / `WRITE_IDLE` stays high, regardless
+      of how `S_AXIS_VALID` is driven.
+
+  # ── Software-managed ring read pointer (DDR-P2.4 / DS-P2.59) ──────────
+  - id: DDR-REQ-500
+    kind: behavioral
+    desc: >-
+      With `G_ENABLE_READ_PLANE`=false (no HW downloader), a consumer that
+      drains DDR via its own master re-instates the SPSC drain by writing the
+      byte offset it has consumed up to (mod ring size) on `CSR_RD_PTR_ADDR`
+      with `CSR_RD_PTR_LOAD`=1. The IP frees the corresponding ring space so the
+      write pointer (`M_AXI_AWADDR`) keeps wrapping — sustained, lossless
+      operation past many rings. Same units as the commit pointer
+      (`wr_commit_addr_o`). The load is gated by the read bus being idle (always,
+      with the read plane elided), so it may be advanced at any time.
+
+  - id: DDR-REQ-501
+    kind: behavioral
+    desc: >-
+      Back-compatibility / opt-in: with `G_ENABLE_READ_PLANE`=false and the
+      software read pointer NEVER written (`CSR_RD_PTR_LOAD`=0), behaviour is
+      byte-identical to the legacy tied-low read pointer — the ring fills to the
+      top exactly once and then stalls (`M_AXI_AWADDR` reaches the last slot and
+      does not wrap again). `CSR_RD_PTR_ADDR` defaults to 0.
+
+  # ── Software-managed ring write pointer (DDR-P3.16) ──────────────────
+  # Symmetric mirror of DDR-REQ-500/501 on the write plane: lets a read-only
+  # integration (PS produces into DDR, no HW uploader) drive the source side.
+  - id: DDR-REQ-502
+    kind: behavioral
+    desc: >-
+      With `G_ENABLE_WRITE_PLANE`=false (no HW uploader), a producer that fills
+      DDR via its own master re-instates the SPSC source by writing the byte
+      offset it has produced up to (mod ring size) on `CSR_WR_PTR_ADDR` with
+      `CSR_WR_PTR_LOAD`=1. The IP presents the corresponding ring data so the HW
+      downloader's read pointer (`M_AXI_ARADDR`) keeps wrapping — sustained,
+      lossless reads past many rings. Same units as the commit pointer
+      (`wr_commit_addr_o`).
+
+  - id: DDR-REQ-503
+    kind: behavioral
+    desc: >-
+      Back-compatibility / opt-in: with `G_ENABLE_WRITE_PLANE`=false and the
+      software write pointer NEVER written (`CSR_WR_PTR_LOAD`=0), behaviour is
+      byte-identical to the legacy tied-to-`uploader_addr` (=0) write pointer —
+      the ring is permanently empty and the downloader issues NO read bursts
+      (`M_AXI_ARVALID` never asserts). `CSR_WR_PTR_ADDR` defaults to 0.
+
+  # ── Frame-aware VDMA frame-buffer specialization (DDR-P2.12) ─────────
+  # A VDMA frame buffer is a *disciplined use* of the linear byte ring, NOT a
+  # new datapath: the ring window [base, base + 2^`G_BUFFER_WIDTH`) is carved
+  # into N equal frame-buffer slots of FRAME_BYTES each (N-buffer rotation),
+  # and the consumer advances its read pointer only on whole-frame boundaries
+  # (tear-free handoff). These REQs pin down BOTH (a) what the ring guarantees a
+  # frame-buffer consumer at the byte-SEQUENCE level and (b) the INPUT-DOMAIN
+  # constraints a producer must honour for those guarantees to hold — because
+  # the IP itself is frame-AGNOSTIC (it has no SOF port and no notion of frame
+  # length), so a producer that breaks frame cadence or geometry silently
+  # corrupts the frame layout with no error signalled.
+  #
+  # Consumer: linux_zybo stereo pipeline (2x VmodCAM) swapping its Xilinx AXI
+  # VDMA for this IP (linux_zybo/docs/08_Epic_Plan_RouteRTL_Stereo.md, owner
+  # -approved 2026-08-20). The frame-buffer semantics below are the contract
+  # that swap depends on.
+  #
+  # Test geometry (sim/cocotb/tests/test_ddr_vdma_framebuf.py): ring = 4 KiB
+  # (`G_BUFFER_WIDTH`=12), N=4 buffers, FRAME_BYTES=1024, write plane on / read
+  # plane off (PS/HW reader drains via `CSR_RD_PTR_ADDR`) — the linux_zybo
+  # capture topology.
+  - id: DDR-REQ-600
+    kind: behavioral
+    desc: >-
+      N-BUFFER ROTATION. With the ring window carved into N equal FRAME_BYTES
+      slots (ring = N*FRAME_BYTES) and a conforming producer delivering exactly
+      FRAME_BYTES per frame, the write head `M_AXI_AWADDR` starts at the pool
+      base (SOF-aligned: the first accepted write of a run lands at slot 0) and
+      then sweeps the N frame-buffer slots in strict ascending round-robin —
+      slot k, k+1, … N-1, 0 — never skipping a slot, sustained across many ring
+      passes as the read side frees space. Robust to source bubbles
+      (`S_AXIS_VALID` deasserting) at frame starts: a stalled-but-complete frame
+      does not perturb the rotation.
+
+  - id: DDR-REQ-601
+    kind: behavioral
+    desc: >-
+      FRAME-GRANULAR TEAR-FREE DRAIN. A consumer that advances `CSR_RD_PTR_ADDR`
+      only in whole-FRAME_BYTES increments — never mid-frame — sustains lossless
+      ring rotation exactly as a byte-granular drain does: the write head
+      `M_AXI_AWADDR` keeps wrapping within the N-buffer pool and never escapes it
+      and never wedges. Because the reader releases only WHOLE frames, the ring's
+      SPSC no-overwrite invariant (DDR-REQ-001/002/500) is applied at frame
+      granularity — the writer's back-pressure lands on a frame boundary, so the
+      frame most-recently released to the reader is complete, never a torn splice
+      of two producer passes. Precondition (see DDR-REQ-603): the AXI write-burst
+      cap `G_MAX_BURST_LEN` must be ≤ FRAME_BYTES/beat, else one burst can span a
+      whole frame and back-pressure cannot land on a frame boundary.
+
+  - id: DDR-REQ-602
+    kind: negative
+    desc: >-
+      INPUT-DOMAIN — EXACT FRAME CADENCE. The IP is frame-agnostic: it commits
+      `S_AXIS_DATA` words to the ring in strict byte order with no notion of
+      frame length and no SOF/restart port. A producer therefore MUST deliver
+      EXACTLY FRAME_BYTES per frame. A RUNT frame (fewer than FRAME_BYTES) — or,
+      equivalently, a mid-frame SOF that restarts a buffer before it is full — is
+      OUTSIDE the input domain: the IP does not pad or re-align it, so it shifts
+      every subsequent frame base by the byte deficit and desynchronises the
+      N-buffer rotation. This is distinct from back-pressure/bubbles: a frame
+      that is merely stalled (`S_AXIS_VALID`=0 gaps) but eventually complete is
+      IN-domain and does not desync. The test proves the constraint is
+      load-bearing by driving one runt frame and observing the frame markers in
+      DDR land at non-FRAME_BYTES-aligned addresses.
+
+  - id: DDR-REQ-603
+    kind: negative
+    desc: >-
+      INPUT-DOMAIN — WHOLE-BUFFER GEOMETRY, NO PER-BURST ATOMICITY. The frame
+      -buffer contract (600–602) holds only when FRAME_BYTES divides the ring
+      2^`G_BUFFER_WIDTH` (an integral number N of whole slots). A FRAME_BYTES
+      that does not divide the ring is prohibited: a frame then straddles the
+      ring wrap and occupies two non-adjacent regions. Separately, consumers MUST
+      NOT assume per-burst buffer atomicity — because the IP is a linear byte
+      ring, a single `M_AXI_AWADDR` write burst MAY straddle a FRAME_BYTES slot
+      boundary; frame integrity is a property of the byte SEQUENCE (600/601), not
+      of AXI burst boundaries. The test proves both: with a dividing geometry the
+      write head crosses each FRAME_BYTES boundary at an aligned address, and it
+      exhibits at least one burst that straddles a slot boundary — the exact
+      limitation a consumer must design around.
+
+  - id: DDR-REQ-RST-1
+    kind: negative
+    desc: >-
+      While `RST_SYS` / `RST_DDR` are asserted, and throughout the reset-busy
+      settling window after deassertion, the IP issues no master traffic:
+      `M_AXI_ARVALID`, `M_AXI_AWVALID`, and `M_AXIS_VALID` all stay low.
+
+  - id: DDR-REQ-RST-2
+    kind: behavioral
+    desc: >-
+      After reset deassertion and a CDC settle window, the ring reports empty
+      across the clock-domain crossing (chip-empty), so no read is issued on an
+      unwritten ring — `M_AXI_ARVALID` never asserts.
+
+  - id: DDR-REQ-RST-3
+    kind: behavioral
+    desc: >-
+      After a reset applied mid-stream (during active read traffic) and then
+      deasserted, the IP recovers and resumes issuing read transactions
+      (`M_AXI_ARADDR`); with the write plane disabled, `M_AXI_AWVALID` stays low
+      throughout.
+
+  - id: DDR-REQ-RST-4
+    kind: negative
+    desc: >-
+      Under asymmetric reset deassertion (`RST_SYS` released before `RST_DDR`),
+      no read traffic is issued during the reset-busy window: `M_AXI_ARVALID`
+      stays low until both domains are out of reset and settled — the
+      cross-domain reset deassertion is safe.
+
+  - id: DDR-REQ-RST-5
+    kind: negative
+    desc: >-
+      A reset applied mid-stream, after the software-managed ring pointer has
+      been driven to a non-zero, wrapped position, fully clears the internal
+      pointer state: no `M_AXI_ARVALID` / `M_AXIS_VALID` during the reset-busy
+      window, and — with no new pointer CSR pulse after reset — the ring
+      behaves exactly like a cold, never-written ring (empty, no reads). The
+      pointer registers must never carry stale pre-reset position across the
+      reset boundary (DDR-T2.15 coverage gap, DDR-P2.9).

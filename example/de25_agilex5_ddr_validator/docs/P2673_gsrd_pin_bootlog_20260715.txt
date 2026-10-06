@@ -1,0 +1,171 @@
+U-Boot SPL 2025.07-ge5f40a8ed1ec-dirty (Jul 15 2026 - 16:13:32 +0200)
+Reset state: Cold
+MPU           800000 kHz
+L4 Main	      400000 kHz
+L4 sys free   100000 kHz
+L4 MP         200000 kHz
+L4 SP         100000 kHz
+SDMMC          50000 kHz
+init_mem_cal: Initial DDR calibration IO96B_0 succeed
+DDR: Calibration success
+is_mailbox_spec_compatible: IOSSM mailbox version: 1
+DDR4: 1024 MiB
+DDR: size check success
+DDR: firewall init success
+DDR: init success
+Bloblist at 72000 not found (err=-2)
+WDT:   Not starting watchdog@10d00200
+Trying to boot from MMC1
+## Checking hash(es) for config board-0 ... OK
+## Checking hash(es) for Image atf ... crc32+ OK
+## Checking hash(es) for Image uboot ... crc32+ OK
+## Checking hash(es) for Image fdt-0 ... crc32+ OK
+NOTICE:  SOCFPGA: Boot Core = 0
+NOTICE:  SOCFPGA: CPU ID = 0
+NOTICE:  SOCFPGA: Setting CLUSTERECTRL_EL1
+NOTICE:  BL31: v2.13.0(release):QPDS25.3_REL_GSRD_PR-dirty
+NOTICE:  BL31: Built : 14:13:12, Jul 15 2026
+U-Boot 2025.07-ge5f40a8ed1ec-dirty (Jul 15 2026 - 16:13:32 +0200)socfpga_agilex5
+CPU: Altera FPGA SoCFPGA Platform (ARMv8 64bit Cortex-A55/A76)
+Model: SoCFPGA Agilex5 SoCDK
+DRAM:  1 GiB
+Core:  52 devices, 23 uclasses, devicetree: separate
+WDT:   Not starting watchdog@10d00200
+WDT:   Not starting watchdog@10d00300
+WDT:   Not starting watchdog@10d00400
+WDT:   Not starting watchdog@10d00500
+WDT:   Not starting watchdog@10d00600
+MMC:   mmc0@10808000: 0
+Loading Environment from FAT... OK
+In:    serial1@10c02100
+Out:   serial1@10c02100
+Err:   serial1@10c02100
+Net:   
+Warning: ethernet@10810000 MAC addresses don't match:
+Address in DT is		ff:ff:ff:ff:ff:ff
+Address in environment is	5e:68:b5:aa:29:d1
+eth0: ethernet@10810000
+Warning: ethernet@10830000 MAC addresses don't match:
+Address in DT is		ff:ff:ff:ff:ff:ff
+Address in environment is	b6:74:e8:1e:16:af
+, eth2: ethernet@10830000
+Hit any key to stop autoboot:  5 
+410 bytes read in 10 ms (40 KiB/s)
+## Executing script at 82000000
+52017664 bytes read in 8728 ms (5.7 MiB/s)
+24838 bytes read in 21 ms (1.1 MiB/s)
+## Flattened Device Tree blob at 86000000
+   Booting using the fdt blob at 0x86000000
+Working FDT set to 86000000
+   Loading Device Tree to 00000000beaf8000, end 00000000beb01105 ... OK
+Working FDT set to beaf8000
+Starting kernel ...
+Deasserting all peripheral resets
+[    0.384075] printk: legacy console [ttyS1] enabled
+[    0.384075] printk: legacy console [ttyS1] enabled
+[    0.393724] printk: legacy bootconsole [uart8250] disabled
+[    0.393724] printk: legacy bootconsole [uart8250] disabled
+[    0.411423] msm_serial: driver initialized
+[    0.416215] SuperH (H)SCI(F) driver initialized
+[    0.421093] STM32 USART driver initialized
+[    0.427103] arm-smmu-v3 16000000.iommu: ias 48-bit, oas 48-bit (features 0x00181fef)
+[    0.435858] arm-smmu-v3 16000000.iommu: allocated 65536 entries for cmdq
+[    0.443044] arm-smmu-v3 16000000.iommu: allocated 32768 entries for evtq
+[    0.450374] arm-smmu-v3 16000000.iommu: msi_domain absent - falling back to wired irqs
+[    0.459165] platform firmware:svc: Adding to iommu group 0
+[    0.464885] platform 10808000.mmc0: Adding to iommu group 1
+[    0.470553] platform 10db0000.dma-controller: Adding to iommu group 2
+[    0.477072] platform 10dc0000.dma-controller: Adding to iommu group 3
+[    0.483657] platform 10b00000.usb: Adding to iommu group 4
+[    0.489237] platform 11000000.usb1: Adding to iommu group 5
+[    0.494969] platform 10810000.ethernet: Adding to iommu group 6
+[    0.511088] loop: module loaded
+[    0.516408] megasas: 07.734.00.00-rc1
+[    0.532080] tun: Universal TUN/TAP device driver, 1.6
+[    0.538780] thunder_xcv, ver 1.0
+[    0.542151] thunder_bgx, ver 1.0
+[    0.545485] nicpf, ver 1.0
+[    0.550485] e1000: Intel(R) PRO/1000 Network Driver
+[    0.555398] e1000: Copyright (c) 1999-2006 Intel Corporation.
+[    0.561219] e1000e: Intel(R) PRO/1000 Network Driver
+[    0.566194] e1000e: Copyright(c) 1999 - 2015 Intel Corporation.
+[    0.572172] igb: Intel(R) Gigabit Ethernet Network Driver
+[    0.577579] igb: Copyright (c) 2007-2014 Intel Corporation.
+[    0.583211] igbvf: Intel(R) Gigabit Virtual Function Network Driver
+[    0.589482] igbvf: Copyright (c) 2009 - 2012 Intel Corporation.
+[    0.595970] sky2: driver version 1.30
+[    0.603732] socfpga-dwmac 10810000.ethernet: IRQ eth_wake_irq not found
+[    0.610412] socfpga-dwmac 10810000.ethernet: IRQ eth_lpi not found
+[    0.616666] socfpga-dwmac 10810000.ethernet: IRQ sfty not found
+[    0.623360] socfpga-dwmac 10810000.ethernet: User ID: 0x76, Synopsys ID: 0x31
+[    0.630520] socfpga-dwmac 10810000.ethernet: 	XGMAC2
+[    0.635500] socfpga-dwmac 10810000.ethernet: DMA HW capability register supported
+[    0.642990] socfpga-dwmac 10810000.ethernet: RX Checksum Offload Engine supported
+[    0.650470] socfpga-dwmac 10810000.ethernet: COE Type 1
+[    0.655700] socfpga-dwmac 10810000.ethernet: TX Checksum insertion supported
+[    0.662749] socfpga-dwmac 10810000.ethernet: TSO supported
+[    0.668239] socfpga-dwmac 10810000.ethernet: Enable RX Mitigation via HW Watchdog Timer
+[    0.676241] socfpga-dwmac 10810000.ethernet: Enabled L3L4 Flow TC (entries=16)
+[    0.683464] socfpga-dwmac 10810000.ethernet: Enabled RFS Flow TC (entries=10)
+[    0.690597] socfpga-dwmac 10810000.ethernet: TSO feature enabled
+[    0.696603] socfpga-dwmac 10810000.ethernet: SPH feature enabled
+[    0.702611] socfpga-dwmac 10810000.ethernet: Using 40/40 bits DMA host/device width
+[    0.956488] dwc3 11000000.usb1: DWC3 controller soft reset failed.
+[    0.962716] dwc3 11000000.usb1: error -ETIMEDOUT: failed to initialize core
+[    0.969754] dwc3 11000000.usb1: probe with driver dwc3 failed with error -110
+[    0.979634] dwc2 10b00000.usb: supply vusb_d not found, using dummy regulator
+[    0.987028] dwc2 10b00000.usb: supply vusb_a not found, using dummy regulator
+[    0.994650] dwc2 10b00000.usb: EPs: 16, dedicated fifos, 8064 entries in SPRAM
+[    1.002158] dwc2 10b00000.usb: DWC OTG Controller
+[    1.006910] dwc2 10b00000.usb: new USB bus registered, assigned bus number 1
+[    1.013993] dwc2 10b00000.usb: irq 40, io mem 0x10b00000
+[    1.020338] hub 1-0:1.0: USB hub found
+[    1.024180] hub 1-0:1.0: 1 port detected
+[    1.031981] usbcore: registered new interface driver usb-storage
+[    1.043753] i2c_dev: i2c /dev entries driver
+[    1.062660] sdhci: Secure Digital Host Controller Interface driver
+[    1.068914] sdhci: Copyright(c) Pierre Ossman
+[    1.074603] Synopsys Designware Multimedia Card Interface Driver
+[    1.082318] sdhci-pltfm: SDHCI platform and OF driver helper
+[    1.092715] SMCCC: SOC_ID: ARCH_SOC_ID not implemented, skipping ....
+[    1.101513] usbcore: registered new interface driver usbhid
+[    1.107132] usbhid: USB HID core driver
+[    1.110994] SPI driver fb_uc1701 has no spi_device_id for UltraChip,uc1701
+[    1.123625] hw perfevents: enabled with armv8_pmuv3 PMU driver, 7 (0,8000003f) counters available
+[    1.139803] NET: Registered PF_PACKET protocol family
+[    1.145286] 9pnet: Installing 9P2000 support
+[    1.149701] Key type dns_resolver registered
+[    1.171133] registered taskstats version 1
+[    1.175721] Loading compiled-in X.509 certificates
+[    1.194372] Demotion targets for Node 0: null
+[    1.212733] stratix10-svc firmware:svc: Registered IRQ 47 for sip async operations
+[    1.232942] Intel Service Layer Driver Initialized
+[    1.245123] dw_axi_dmac_platform 10db0000.dma-controller: DesignWare AXI DMA Controller, 4 channels
+[    1.256645] dw_axi_dmac_platform 10dc0000.dma-controller: DesignWare AXI DMA Controller, 4 channels
+[    1.269608] fb_uc1701 spi0.0: fbtft_property_value: width = 128
+[    1.275626] fb_uc1701 spi0.0: fbtft_property_value: height = 64
+[    1.281570] fb_uc1701 spi0.0: fbtft_property_value: buswidth = 8
+[    1.287595] fb_uc1701 spi0.0: fbtft_property_value: rotate = 0
+[    1.320520] usb 1-1: new high-speed USB device number 2 using dwc2
+[    1.433220] Console: switching to colour frame buffer device 16x8
+[    1.439607] graphics fb0: fb_uc1701 frame buffer, 128x64, 16 KiB video memory, 4 KiB buffer memory, fps=20, spi0.0 at 2 MHz
+[    1.470114] of_cfs_init
+[    1.476677] of_cfs_init: OK
+[    1.480005] clk: Disabling unused clocks
+[    1.493501] PM: genpd: Disabling unused power domains
+[    1.499425] dw-apb-uart 10c02100.serial: forbid DMA for kernel console
+[    1.525584] hub 1-1:1.0: USB hub found
+[    1.529666] mmc0: SDHCI controller on 10808000.mmc0 [10808000.mmc0] using ADMA 64-bit
+[    1.537867] hub 1-1:1.0: 2 ports detected
+[    1.563212] Freeing unused kernel memory: 13312K
+[    1.568621] Run /init as init process
+=======================================================
+  rr linux rootfs 
+ busybox v1.36.1
+  Kernel: Linux 6.18.2-gbe94a41dfaf7-dirty #1 SMP PREEMPT Wed Jun 10 12:53:35 CEST 2026
+  Hardware: aarch64
+=======================================================
+~ # [    1.712139] mmc0: error -110 whilst initialising SD card
+[    1.820505] usb 1-1.1: new full-speed USB device number 3 using dwc2
+[    2.012491] usb 1-1.2: new high-speed USB device number 4 using dwc2
+[    3.592503] random: crng init done

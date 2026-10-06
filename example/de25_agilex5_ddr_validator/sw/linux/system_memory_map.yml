@@ -1,0 +1,46 @@
+# Linux memory map for the DE25-Standard (Agilex 5 SoC) ddr_stream_axi validator.
+# Mirror of the Zybo example's map, retargeted PS→HPS. SINGLE SOURCE OF TRUTH
+# for the HPS-visible memory-mapped IPs in the fabric.
+#
+# ARCHITECTURE CONFIRMED against the TerASIC DE25 SoC_FPGA GHRD (revD v1.2.0,
+# Demonstration/SoC_FPGA/GHRD — the golden HPS reference; see BENCH_RUNBOOK).
+# That GHRD is our 1:1 template: HPS + `f2sdram_adapter` (f2h → HPS DDR) +
+# `peripheral_subsys` (PIO/sysid on the lwh2f bridge) — exactly our datapath.
+#
+#   * f2h → HPS DDR window (GHRD f2sdram_adapter_axi4_sub): start 0x0,
+#     end 0x1_0000_0000 (4 GiB), AXI datawidth 256. The stream ring lands here.
+#   * lwh2f CSR window (GHRD peripheral_subsys, sits at +0x40000 on lwh2f):
+#     sysid@+0x10000, button_pio@+0x10060, dipsw_pio@+0x10070, led_pio@+0x10080.
+#     Our ddr_validator_csr replaces those PIOs at the analogous lwh2f offset.
+#
+# *** lwh2f base = 0x20000000 — SILICON-VALIDATED 2026-06-08 (RTL-P3.739): an HPS
+# read of base+0x3C returns IDENT 0x0DD50200 and REA confirms lw_arvalid asserts.
+# Source of truth = the ATF NCORE CCU region map (ncore_ccu.h):
+#   base_addr_DII0_LWHPS2FPGA = 0x20000  ->  <<12 = 0x20000000
+#   (cross-check: base_addr_DII0_PSSPERIPHS = 0x10000 -> 0x10000000 = HPS periph base)
+# The earlier 0xF9000000 ("Altera-confirmed" from gen1-Agilex/GSRD docs) was WRONG
+# for Agilex5 — it decodes to NO CCU region and raises a synchronous external abort;
+# that bad address (NOT the firewall/bridge) was the real root cause of the RTL-P3.739
+# SIGBUS. 0xFF200000 (tried 2026-06-07) was also wrong (gen5/Cyclone-V). Reaching the
+# window still requires the lwh2f bridge out of reset (brgmodrst / `bridge enable`) +
+# the lwsoc2fpga firewall open (socfpga-secreg). ***
+#
+# As in the Zybo design: only the CSR is an HPS-visible device. The stream ring
+# lives in HPS DDR (f2h window), carved out of the kernel via the `mem=`/reserved
+# region (boot.scr) — NOT a device; the validator compares IN FABRIC so userspace
+# never maps the ring.
+version: "1.0.0"
+target: agilex5-hps          # was zynq-7000
+devices:
+  # ddr_validator_csr — AXI4-Lite slave on the HPS lightweight h2f (lwh2f) bridge.
+  # ddr_validator.c (reused verbatim) mmaps this via /dev/mem (O_SYNC, uncached).
+  - name: ddr_validator_csr
+    base_addr: 0x20000000      # Agilex5 lwh2f (lwsoc2fpga) aperture — silicon-validated (RTL-P3.739).
+                              # CSR decodes low 12 bits; qsys connection baseAddress 0x0 →
+                              # CSR sits at the window base (IDENT 0x0DD50200 read back at +0x3C).
+                              # Requires the lwh2f bridge out of reset + lwsoc2fpga firewall open.
+    span:      0x1000          # 4 KiB CSR window
+    # No `compatible` — userspace reaches it via /dev/mem (zero driver deps).
+# stream ring (HPS DDR via f2h): carve via boot reserved-mem from the f2sdram
+# 0x0–0x1_0000_0000 (4 GiB, 256-bit) window. base/size TODO(RTL-P3.682) —
+# Zybo analog used PS-DDR @ 0x1000_0000 with a mem= clamp.

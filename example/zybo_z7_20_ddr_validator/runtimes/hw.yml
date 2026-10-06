@@ -1,0 +1,106 @@
+# runtimes/hw.yml — rr.hw.contract/v1 BIST recipe for the Zybo Z7-20 DDR validator.
+#
+# This is the on-silicon witness recipe that `rr hw bist zybo-z7-20 --bitstream
+# <name>` loads and drives over the U-Boot console (RTL-P2.781 lane-D capstone).
+# It encodes the DDR-P2.8 fabric-BIST CSR verdict — the sequence that was proven
+# by hand on Zynq-7 silicon (memory reference_zynq7_uboot_fabric_bist_verdict) —
+# as a standard contract so the capstone is TURNKEY (no hand-scripting). Fixes
+# RTL-T2.87 (CP1 of runbook RTL-P3.1005 aborted: "no BIST contract").
+#
+# CSR map (AXI-Lite, 4 KiB @ 0x4000_0000 — see src/ddr_validator_csr.vhd +
+# docs/DESIGN.md §4). Absolute physical addresses because the U-Boot probe reads
+# MMU-off (md/mw at the raw window base):
+#   0x40000000 CTRL          [0]start(W1P) [1]soft_reset(W1P) [8]continuous
+#   0x40000004 STATUS   (R)  [0]running [1]done [2]pass [3]fail [4]write_idle [5]read_idle
+#   0x40000008 SCENARIO      [3:0] scenario id (0 = roundtrip)
+#   0x4000000c N_WORDS       user-words this run (reset default 8192)
+#   0x40000010 ERROR_COUNT (R) mismatches this run
+#   0x4000003c IDENT     (R) 0x0dd50200 magic (host sanity probe)
+#
+# NOTE: `expected` values are LOWERCASE 8-digit hex — UbootConsoleProbe.peek
+# returns "0x" + md-word.lower(), and the executor compares observed == expected
+# as an exact string (sdk/engine/hardware/executor.py). Uppercase or short forms
+# would false-FAIL a genuinely-passing board.
+#
+# SPDX-FileCopyrightText: 2026 Daniel J. Mazure
+# SPDX-License-Identifier: MIT
+
+schema: "rr.hw.contract/v1"
+version: 0.1
+
+requirements:
+  - id: "BIST-DDR-001"
+    description: >-
+      DDR-P2.8 fabric BIST: the roundtrip scenario (push a counter through
+      S_AXIS to DDR, read it back via M_AXIS, compare word-for-word) completes
+      with STATUS done+pass and zero mismatches on the 0x4000_0000 validator CSR
+      window. This is the turnkey form of the hand-scripted Zynq-7 silicon
+      verdict (STATUS==0x36, ERROR_COUNT==0).
+    expected_outcome: "pass"
+    falsifier: "BIST-DDR-RED-001"
+    target:
+      board: "zybo-z7-20"
+    preconditions:
+      - name: "bitstream_loaded"
+        via: "rr hw bist zybo-z7-20 --bitstream ddr_validator.bit (TFTP + fpga loadb over U-Boot)"
+    steps:
+      - {idx: 1, kind: "peek",     addr: "0x4000003c", expected: "0x0dd50200",
+         comment: "IDENT magic — confirm the validator CSR is alive before kicking a run"}
+      - {idx: 2, kind: "poke",     addr: "0x40000008", value: "0x00000000",
+         comment: "SCENARIO = 0 (roundtrip)"}
+      - {idx: 3, kind: "poke",     addr: "0x40000000", value: "0x00000001",
+         comment: "CTRL.start (write-1-to-pulse) — kick the run"}
+      - {idx: 4, kind: "wait_for", addr: "0x40000004", mask: "0x00000002",
+         expected: "0x00000002", timeout_s: 15.0,
+         comment: "STATUS.done rises when the roundtrip finishes"}
+      - {idx: 5, kind: "peek",     addr: "0x40000004", expected: "0x00000036",
+         comment: "STATUS == done|pass|write_idle|read_idle (0x36); running=0, fail=0"}
+      - {idx: 6, kind: "peek",     addr: "0x40000010", expected: "0x00000000",
+         comment: "ERROR_COUNT == 0 — no word mismatches this run"}
+    assertions:
+      - {id: "A1", expr: "step[1].observed == step[1].expected"}
+      - {id: "A2", expr: "step[4].satisfied == true"}
+      - {id: "A3", expr: "step[5].observed == step[5].expected"}
+      - {id: "A4", expr: "step[6].observed == step[6].expected"}
+    evidence_required:
+      - console_log
+  - id: "BIST-DDR-RED-001"
+    description: >-
+      DDR-P2.8 fabric BIST negative control: inject an address mismatch /
+      corrupted readback pattern by offsetting RD_BASE away from WR_BASE.
+      The roundtrip scenario must report STATUS done+fail (0x3a) and non-zero
+      ERROR_COUNT on the 0x4000_0000 validator CSR window, falsifying the
+      clean pass assertions (STATUS==0x36, ERROR_COUNT==0).
+    expected_outcome: "demonstrated_broken"
+    falsifier: "none"
+    falsifier_waiver: "This corrupted readback pattern injection is the negative control itself."
+    target:
+      board: "zybo-z7-20"
+    preconditions:
+      - name: "bitstream_loaded"
+        via: "rr hw bist zybo-z7-20 --bitstream ddr_validator.bit (TFTP + fpga loadb over U-Boot)"
+    steps:
+      - {idx: 1, kind: "peek",     addr: "0x4000003c", expected: "0x0dd50200",
+         comment: "IDENT magic — confirm the validator CSR is alive before kicking a run"}
+      - {idx: 2, kind: "poke",     addr: "0x4000002c", value: "0x00100000",
+         comment: "RD_BASE = 0x00100000 (offset read window by 1 MiB from WR_BASE to inject pattern mismatch)"}
+      - {idx: 3, kind: "poke",     addr: "0x40000030", value: "0x00000002",
+         comment: "BASE_LOAD = 0x2 (pulse load RD_BASE strobe)"}
+      - {idx: 4, kind: "poke",     addr: "0x40000008", value: "0x00000000",
+         comment: "SCENARIO = 0 (roundtrip)"}
+      - {idx: 5, kind: "poke",     addr: "0x40000000", value: "0x00000001",
+         comment: "CTRL.start (write-1-to-pulse) — kick the run"}
+      - {idx: 6, kind: "wait_for", addr: "0x40000004", mask: "0x00000002",
+         expected: "0x00000002", timeout_s: 15.0,
+         comment: "STATUS.done rises when the roundtrip finishes"}
+      - {idx: 7, kind: "peek",     addr: "0x40000004", expected: "0x00000036",
+         comment: "STATUS == done|pass|write_idle|read_idle (0x36); corrupted readback must make this RED"}
+      - {idx: 8, kind: "peek",     addr: "0x40000010", expected: "0x00000000",
+         comment: "ERROR_COUNT == 0; corrupted readback must make this RED"}
+    assertions:
+      - {id: "A1", expr: "step[1].observed == step[1].expected"}
+      - {id: "A2", expr: "step[6].satisfied == true"}
+      - {id: "A3", expr: "step[7].observed == step[7].expected"}
+      - {id: "A4", expr: "step[8].observed == step[8].expected"}
+    evidence_required:
+      - console_log

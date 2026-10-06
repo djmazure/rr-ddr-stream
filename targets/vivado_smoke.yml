@@ -1,0 +1,83 @@
+# Synthesis smoke target — Xilinx / Vivado / ddr_stream_axi TOP.
+#
+# RR--P3.5: dual-vendor `rr synth` smoke gate. Paired with
+# targets/quartus_smoke.yml (Intel / Quartus / ddr_stream_avmm).
+# Verification harness for:
+#   - RR--P3.3 — per-vendor xpm source selection (xpm_body files
+#     included here because Vivado understands xpm; Quartus side
+#     excludes them).
+#   - DDR-P3.39 — fixed-width `ddr_base_addr_g` vector (closed).
+#
+# Use:
+#   rr target set vivado_smoke && rr synth run
+#
+# This target uses the same placeholder XC7Z020 part as the dev
+# project.yml — the IP is synth-only at this stage (no bitstream,
+# no board pins, no XDC).
+
+project:
+  name: rr_ddr_stream_vivado_smoke
+  top_module: ddr_stream_axi
+  output_dir: out/vivado_smoke
+
+hardware:
+  vendor: xilinx
+  part: xc7z020clg400-1
+  language: vhdl
+  platform: default
+
+build_options:
+  tool_version: "2024.1"
+  # RR--P3.6: synth-verify the 32/512 width combo (Intel-EMIF
+  # canonical case) alongside the 32/128 default — both must synth.
+  generics:
+    user_data_width_g: 32
+    ddr_data_width_g:  512
+
+# Explicit source list — RR--P3.3 xpm_body files INCLUDED (Xilinx flavour).
+# Once routertl RTL-P3.512 lands, this list will collapse to the ip.yml
+# synthesis.sources + sources_per_vendor.xilinx union, picked up
+# automatically when hardware.vendor == "xilinx".
+sources:
+  syn:
+    - rtl/ddr_stream_pkg.vhd
+    - rtl/support/functions_pkg.vhd
+    - rtl/support/ddr_sync_cdc.vhd
+    - rtl/support/skid_buffer.vhd
+    # olo base deps (open-logic). One source per file; the walker
+    # would normally pull these via libs/ but smoke target is explicit.
+    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_array.vhd
+    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_math.vhd
+    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_logic.vhd
+    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_string.vhd
+    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_attribute.vhd
+    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_cc_bits.vhd
+    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_cc_reset.vhd
+    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_ram_sdp.vhd
+    - libs/open-logic/olo_base_fifo_sync/src/base/vhdl/olo_base_fifo_sync.vhd
+    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_fifo_async.vhd
+    - libs/open-logic/olo_base_wconv_n2xn/src/base/vhdl/olo_base_wconv_n2xn.vhd
+    - libs/open-logic/olo_base_wconv_xn2n/src/base/vhdl/olo_base_wconv_xn2n.vhd
+    # RR--P3.3 — xpm bodies (Xilinx-only). Compiled here so the
+    # GEN_XPM branch of rr_fifo_sync / rr_fifo_async_mixed resolves
+    # against a real entity if a downstream selects fifo_impl_g=xpm.
+    - rtl/support/xilinx/rr_fifo_sync_xpm_body.vhd
+    - rtl/support/xilinx/rr_fifo_async_mixed_xpm_body.vhd
+    # vendor-neutral wrappers.
+    - rtl/support/rr_fifo_sync.vhd
+    - rtl/support/rr_fifo_async_mixed.vhd
+    # bus-agnostic + AXI backend.
+    - rtl/ddr_fifo_intf.vhd
+    - rtl/ptr_mgr.vhd
+    - rtl/burstw_setter.vhd
+    - rtl/burstr_setter.vhd
+    - rtl/axi4w.vhd
+    - rtl/axi4r.vhd
+    - rtl/downloader.vhd
+    - rtl/uploader.vhd
+    - rtl/ddr_stream_axi.vhd
+
+paths:
+  sources:
+    - rtl
+    - libs

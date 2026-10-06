@@ -1,0 +1,3 @@
+# DDR-T1.3: raw silicon evidence (serial console CRLF, wire captures) is kept
+# byte-verbatim, so whitespace checks do not apply to it.
+docs/internal/ddr_t1_3_witness/** -whitespace

@@ -1,0 +1,26 @@
+# Linux memory map for the DE25-Standard (Agilex 5 SoC) HPS + heartbeat-LED smoke.
+# SINGLE SOURCE OF TRUTH for the HPS-visible memory-mapped IPs in this fabric.
+#
+# Harvested against the TerASIC DE25 SoC_FPGA GHRD (revD) — our 1:1 template:
+#   * lwh2f CSR window (GHRD peripheral_subsys, sits at +0x40000 on lwh2f):
+#     sysid@+0x10000, led_pio@+0x10080.
+#   * f2h → HPS DDR window (GHRD f2sdram_adapter): 0x0–0x1_0000_0000 (4 GiB,
+#     256-bit). Not used by the heartbeat milestone; recorded for the sibling
+#     DDR validator.
+#
+# *** The ABSOLUTE lwh2f base on the HPS address map is fixed by the Agilex 5
+# HPS hard address map + assigned at qsys-generate (RTL-P3.682). Confirm the
+# led_pio CSR base = <lwh2f_base> + 0x10080 against the generated handoff before
+# relying on it. ***
+version: "1.0.0"
+target: agilex5-hps
+devices:
+  # led_pio — 1-bit output PIO on the HPS lightweight h2f (lwh2f) bridge, driving
+  # HPS_LED. The interim status contract: Linux (RTL-P3.681) toggles this to
+  # prove the h2f/lwh2f path; this milestone only proves the fabric clock via the
+  # free-running heartbeat (no CPU needed).
+  - name: led_pio
+    base_addr: 0x0            # TODO(RTL-P3.682): <lwh2f_base> + 0x10080 from the
+                              # qsys-generated handoff (GHRD places led_pio there).
+    span:      0x10           # 16-byte Avalon PIO register window
+    # No `compatible` — userspace reaches it via /dev/mem when Linux lands.

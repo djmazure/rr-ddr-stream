@@ -1,0 +1,80 @@
+// DE25-Standard U-Boot SD (ComboPHY) fix-up — RTL-P3.739 opt1.
+//
+// PROBLEM: the rr `linux` flow builds U-Boot from `socfpga_agilex5_defconfig`
+// with the `socfpga_agilex5_socdk` DT, which only bare-enables `&mmc`/`&combophy0`.
+// On the DE25-Standard that is NOT enough — the Cadence ComboPHY needs the DE25
+// timing tuning or SD CMD/response sampling fails in SPL:
+//     "Card did not respond to voltage select! : -110"  ->  "mmc init failed (-95)"
+//     -> "SPL: failed to boot from all boot devices"
+// which forces the unsupported hybrid (golden TerASIC SPL + rr ATF/U-Boot).
+//
+// FIX: apply these `&combophy0` + `&mmc` overrides to the U-Boot board DT before
+// building (append into `arch/arm/dts/socfpga_agilex5_socdk.dts`, or better, a
+// DE25 board DT). VALUES HARVESTED from the golden DE25 SPL DTB
+// (GHRD .../software/u-boot/spl/u-boot-spl-dtb.hex) — the only config proven to
+// read this board's fixed-1.8V Micro-SD. With this, the rr SPL boots the DE25 SD
+// and the full COHERENT rr chain (rr SPL -> rr ATF BL31 -> rr U-Boot -> Linux)
+// reaches a shell (bench 2026-06-08).
+//
+// STATUS: works but MARGINAL — the SD init is intermittent (boots, then a later
+// reprogram fails voltage-select again). Likely a ComboPHY-timing margin and/or a
+// driver-version delta between the rr U-Boot commit and the golden build. Needs a
+// robustness pass (additional phy delay params, or the Dec-2025 SD4HC->SD6HC
+// upstream series) before it's production-reliable.
+//
+// PRODUCTIZE (rr-idiomatic): the rr `linux` altera/socfpga backend should apply a
+// per-board U-Boot DT fragment (keyed off `hardware.platform: de25-standard`) so
+// this isn't a manual clone patch. File under RTL-P3.739.
+//
+// NOTE: this fixes the SD/coherent-chain ONLY. The fabric CSR (lwh2f @ 0xF9000000)
+// is STILL unreachable on the coherent chain (external abort even with brgmodrst
+// deasserted + correct base) — that is a separate, fabric-side issue (R3),
+// tracked by DDR-T2.4. The coherent chain was necessary infrastructure, not the
+// CSR fix.
+
+&mmc {
+	status = "okay";
+	bus-width = <4>;
+	sd-uhs-sdr50;
+	cap-mmc-highspeed;
+};
+
+&combophy0 {
+	status = "okay";
+	cdns,phy-use-ext-lpbk-dqs = <0x01>;
+	cdns,phy-use-lpbk-dqs = <0x01>;
+	cdns,phy-use-phony-dqs = <0x01>;
+	cdns,phy-use-phony-dqs-cmd = <0x01>;
+	cdns,phy-io-mask-always-on = <0x00>;
+	cdns,phy-io-mask-end = <0x05>;
+	cdns,phy-io-mask-start = <0x00>;
+	cdns,phy-data-select-oe-end = <0x01>;
+	cdns,phy-sync-method = <0x01>;
+	cdns,phy-sw-half-cycle-shift = <0x00>;
+	cdns,phy-rd-del-sel = <0x34>;
+	cdns,phy-underrun-suppress = <0x01>;
+	cdns,phy-gate-cfg-always-on = <0x01>;
+	cdns,phy-param-dll-bypass-mode = <0x01>;
+	cdns,phy-param-phase-detect-sel = <0x02>;
+	cdns,phy-param-dll-start-point = <0xfe>;
+	cdns,phy-read-dqs-cmd-delay = <0x00>;
+	cdns,phy-clk-wrdqs-delay = <0x00>;
+	cdns,phy-clk-wr-delay = <0x00>;
+	cdns,phy-read-dqs-delay = <0x00>;
+	cdns,phy-phony-dqs-timing = <0x00>;
+	cdns,hrs09-rddata-en = <0x01>;
+	cdns,hrs09-rdcmd-en = <0x01>;
+	cdns,hrs09-extended-wr-mode = <0x01>;
+	cdns,hrs09-extended-rd-mode = <0x01>;
+	cdns,hrs10-hcsdclkadj = <0x03>;
+	cdns,hrs16-wrdata1-sdclk-dly = <0x00>;
+	cdns,hrs16-wrdata0-sdclk-dly = <0x00>;
+	cdns,hrs16-wrcmd1-sdclk-dly = <0x00>;
+	cdns,hrs16-wrcmd0-sdclk-dly = <0x00>;
+	cdns,hrs16-wrdata1-dly = <0x00>;
+	cdns,hrs16-wrdata0-dly = <0x00>;
+	cdns,hrs16-wrcmd1-dly = <0x00>;
+	cdns,hrs16-wrcmd0-dly = <0x00>;
+	cdns,hrs07-rw-compensate = <0x0a>;
+	cdns,hrs07-idelay-val = <0x00>;
+};

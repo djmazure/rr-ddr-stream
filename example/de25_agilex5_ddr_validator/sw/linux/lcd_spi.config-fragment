@@ -1,0 +1,24 @@
+# de25 LCD bring-up (Path B) — the HPS SPIM0 bus + spidev must be BUILT-IN.
+#
+# The busybox initramfs (rr linux rootfs) loads no kernel modules, so anything
+# the LCD app needs at boot has to be =y, not =m. The stock socfpga defconfig
+# ships these as modules; force them in so /dev/spidev0.0 exists when
+# /usr/bin/de25_lcd_kmsg opens it. Merged on top of the auto initramfs fragment
+# by merge_config.sh + olddefconfig (linux.kernel_config_fragments).
+CONFIG_SPI_DESIGNWARE=y
+CONFIG_SPI_DW_MMIO=y
+CONFIG_SPI_SPIDEV=y
+# The Agilex 5 SPIM0 node declares dmas=<&dmac0 16/17> (snps,axi-dma-1.01a). The
+# dw-apb-ssi driver DEFERS PROBE forever if that DMA engine has no driver, so
+# /dev/spidev0.0 never appears. The stock socfpga defconfig omits it — build the
+# DesignWare AXI-DMA driver in so the SPI controller probes (DE25 LCD bring-up).
+CONFIG_DW_AXI_DMAC=y
+# fbtft path: bind the kernel's UC1701/ST7565-family framebuffer driver to the
+# panel (compatible "UltraChip,uc1701") so fbcon renders the console on the LCD
+# — a proven RAM-write protocol vs the hand-rolled spidev writes that wouldn't
+# display. FB_TFT is in staging (CONFIG_STAGING=y already set).
+# fbtft pulls in backlight support; the stock BACKLIGHT_CLASS_DEVICE=m caps
+# FB_TFT at =m (modules don't load in the initramfs) — force the dep + driver =y.
+CONFIG_BACKLIGHT_CLASS_DEVICE=y
+CONFIG_FB_TFT=y
+CONFIG_FB_TFT_UC1701=y

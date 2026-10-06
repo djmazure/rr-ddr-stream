@@ -1,0 +1,29 @@
+# Linux memory map for the Zybo Classic (xc7z010) ddr_stream_axi validator.
+#
+# Scaffolded for `rr linux mmap` / `rr linux sync`. SINGLE SOURCE OF TRUTH
+# for AXI memory-mapped IPs in the PL. `rr linux mmap` reads it and patches
+# the block design's address segments to match (must agree with the
+# assign_bd_address call in tcl_hooks/gen_bd.tcl). `rr linux sync` reads it
+# after XSA export and regenerates the device tree + UIO C/Python headers.
+#
+# NOTE: only the CSR (AXI-Lite control/status, M_AXI_GP0) is a PS-visible
+# memory-mapped device. The IP's DMA ring lives in PS DDR (S_AXI_HP0) at the
+# physical window ddr_base 0x1000_0000; that region is NOT a device — it is
+# DDR carved out of the kernel via the `mem=` boot clamp (see boot.txt /
+# docs/BRING_UP.md). The validator compares IN FABRIC, so userspace never
+# maps the ring.
+
+version: "1.0.0"
+target: zynq-7000
+
+devices:
+  # ddr_validator_csr — AXI4-Lite slave on PS M_AXI_GP0. The userspace
+  # validator app (ddr_validator.c) mmaps this window via /dev/mem (O_SYNC,
+  # uncached) to drive scenarios and read the pass/fail verdict.
+  - name: ddr_validator_csr
+    base_addr: 0x40000000
+    span:      0x1000          # 4 KiB CSR window (docs/DESIGN.md §4)
+    # No `compatible` — this CSR has no mainline driver; userspace reaches it
+    # via /dev/mem. (A UIO node could be added later for a uio_pdrv_genirq
+    # binding, but the validator app deliberately uses /dev/mem for zero
+    # driver dependencies on a minimal rootfs.)

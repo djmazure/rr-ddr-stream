@@ -1,0 +1,125 @@
+# zybo_z7_20_ddr_validator — declarative project descriptor.
+#
+# HW validator for ddr_stream_axi on the Digilent Zybo Z7-20, driving real
+# PS DDR3 through S_AXI_HP0. Pure-rr flow — NO build_project.tcl, NO
+# hand-listed sources.syn, NO create_ip. See docs/DESIGN.md.
+#
+# Peer of vhdl-ethernet/example/zybo_rmii. The block design (PS7 + interconnect
+# + HP/GP wiring) is a generation RECIPE (tcl_hooks/gen_bd.tcl, RTL-P3.506),
+# never a committed .bd.
+
+project:
+  name: rr_ddr_stream_zybo_z7_20_ddr_validator
+  top_module: top_zybo_z7_20_ddr_validator
+
+# Autodiscovery + dependency resolver feed the build directly. No explicit
+# sources.syn list — the resolver walks paths.sources, parses entity/use
+# clauses, and produces compile order. (No alpha glob; the resolver is the moat.)
+auto_sources: true
+
+hardware:
+  vendor: xilinx
+  part: "xc7z020clg400-1"
+  language: vhdl
+  # Canonical Zybo Z7-20 board preset (routertl/boards/zybo-z7-20/ps7_preset.tcl,
+  # auto-applied from this field). Provides PS7 PCW (DDR3, FIXED_IO, FCLK0/1)
+  # and the board_pins .xdc. Flip to retarget to another Zynq-7 board.
+  platform: zybo-z7-20
+  # Project PS7 deltas applied AFTER the board preset (RTL-P2.618). The preset
+  # enables S_AXI_HP2 + the fabric IRQ that this example doesn't use; left on,
+  # S_AXI_HP2_ACLK dangles and BD HDL-gen fails ([BD 41-758]). Turn them off.
+  ps7_hooks:
+    - tcl_hooks/ps7_unused_off.tcl
+
+# SELF-CONTAINED source tree (deepskopion model — NOT a ../../rtl cross-root
+# glob). The example consumes the ddr_stream_axi IP and its olo FIFO deps as
+# PACKAGES installed under ./libs. Why it matters: the IP's rr_fifo_async_mixed
+# instantiates `entity olo.olo_base_wconv_n2xn`, so the olo sources MUST compile
+# into Vivado library `olo`. The package manager records that mapping in ip.lock
+# (library: olo / rr) and the resolver honours it. A raw `../../rtl` cross-root
+# glob carries no such library metadata — olo then resolves to the default lib
+# and synth dies with `[Synth 8-5826] no such design unit ... in library 'olo'`.
+# So sources are just src/ (this example) + libs/ (installed packages). No
+# ../../rtl, no hand-listed paths.libraries — the resolver is the moat.
+paths:
+  sources:
+    - src
+    - libs
+
+  libraries:
+    rr:
+      - libs/local/ddr_stream_axi/rtl/ddr_stream_pkg.vhd
+      - libs/local/ddr_stream_axi/rtl/support/functions_pkg.vhd
+# Packages (rr pkg). `local/ddr_stream_axi` is the IP under test, added with
+#   rr pkg add --local ../.. --name ddr_stream_axi
+# (vendored to libs/local/ddr_stream_axi, library rr). The open-logic/olo_*
+# FIFO primitives are its transitive deps, pinned explicitly too — mirrors the
+# IP's own ip.yml ips: list and deepskopion's project.yml.
+packages:
+  open-logic/olo_base_fifo_sync: ^4.4.1
+  open-logic/olo_base_fifo_async: ^4.4.1
+  open-logic/olo_base_wconv_n2xn: ^4.4.1
+  open-logic/olo_base_wconv_xn2n: ^4.4.1
+  local/ddr_stream_axi: local
+linting:
+  profile: esa-vhdl-baseline-provisional
+
+# NO hand-written constraint files (rr-board-pinout-first + the moat rules):
+#   - LED pins (led[0..3] = M14/M15/G14/D18) are materialized into board_pins
+#     .xdc from routertl/boards/zybo-z7-20/pinout.yml by inferred pinout
+#     subscription — the top's `led` port name matches the registry. Same
+#     pattern as deepskopion (no project pin XDC). PS DDR + FIXED_IO come from
+#     the board PS7 preset.
+#   - The only fabric CDC (the IP's olo async FIFO + sync_cdc + base-addr) is
+#     constrained by the IP ITSELF: ddr_stream_axi ships its proven scoped
+#     RR--P3.8 set_max_delay via ip.yml build.sources.xdc, vendored here by
+#     `rr pkg add --local` and applied as `read_xdc -ref ddr_stream_axi`
+#     (RTL-P2.636). The project adds ZERO timing XDC — this is the moat working
+#     end-to-end (place-and-route WNS -0.443 -> +0.021 ns, Fmax 95.8 -> 125.3
+#     MHz on this board, all from the IP-shipped constraint).
+
+# Block-design recipe — generates `system.bd` (PS7 + proc_sys_reset + AXI
+# interconnect, exposing M_AXI_GP0 + S_AXI_HP0 + FCLK0/1 + resets) at the
+# routertl gen_project step. Never a committed .bd artifact.
+tcl_hooks:
+  gen_project:
+    - tcl_hooks/gen_bd.tcl
+
+# Embedded-Linux bring-up (full validator-app path). XSA sourced natively from
+# the freshly built impl DCP via `rr linux xsa --refresh`. linux_zybo recipe
+# family — same board defconfig + dtsi as vhdl-ethernet/example/zybo_rmii.
+linux:
+  board: zybo-z7-20
+  boot_script: "sw/linux/boot.txt"
+  uboot_repo: "https://github.com/Xilinx/u-boot-xlnx.git"
+  kernel_repo: "https://github.com/Xilinx/linux-xlnx.git"
+  fsbl_repo: "https://github.com/acostillado/embeddedsw.git"
+  first_stage: xilinx-fsbl
+  # Kernel command line baked into the DTB's chosen.bootargs by `rr linux dtb`
+  # (RTL-P2.608, Gate 4 of zynq7-sd-boot-bringup). MUST live here, NOT only in
+  # sw/linux/boot.txt: the `setenv bootargs` in boot.scr is silently ignored in
+  # the modern Xilinx u-boot sdboot flow — the kernel takes chosen.bootargs from
+  # the DTB as-is. Two load-bearing tokens:
+  #   - console=ttyPS0,115200  → binds /dev/console to UART1 (the only enabled
+  #     PS UART on this board → ttyPS0). Without it the kernel boots then panics
+  #     "unable to open an initial console" → "Attempted to kill init".
+  #   - mem=256M  → clamps kernel RAM to the low 256 MiB so the IP's DMA ring at
+  #     ddr_base 0x1000_0000 (256–512 MiB) is carved out of kernel RAM. The CPU
+  #     then never caches/speculatively touches the ring — the design's cache
+  #     hazard is designed out (in-fabric compare + this clamp). See
+  #     docs/BRING_UP.md "the one thing that can sabotage it".
+  bootargs: "console=ttyPS0,115200 earlycon mem=256M"
+
+  # Userspace apps cross-compiled into the initramfs by `rr linux rootfs`
+  # (RTL-P3.618) — declarative replacement for the old sw/linux/build_app.sh.
+  # Built static (the busybox initramfs ships no shared libc / dynamic loader);
+  # `source` is project-root-relative, `install` is the absolute rootfs path.
+  apps:
+    - name: ddr_validator
+      source: sw/linux/ddr_validator.c
+      install: /usr/bin/ddr_validator
+
+# Memory map consumed by `rr linux mmap` — patches the device tree with the
+# validator CSR window at 0x4000_0000 (must agree with assign_bd_address in
+# tcl_hooks/gen_bd.tcl).
+memory_map: sw/linux/system_memory_map.yml

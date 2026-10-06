@@ -1,0 +1,26 @@
+# U-Boot boot script for Zybo Classic (xc7z010) SD-boot — ddr_stream_axi validator.
+#
+# Compiled to boot.scr via:
+#   mkimage -A arm -T script -O linux -d boot.txt boot.scr
+# (rr linux bootscr does this for you.)
+#
+# The dash (-) in bootm skips ramdisk loading (ext4 rootfs, no initramfs).
+#
+# mem=256M is the KEY line for this design: it clamps the kernel's RAM to the
+# low 256 MiB (0x0000_0000..0x0FFF_FFFF), leaving the IP's DMA ring window at
+# ddr_base 0x1000_0000 (256 MiB, 2^buffer_width=28) entirely outside kernel
+# RAM. Without it the kernel may cache/speculatively touch that physical
+# region and corrupt the IP's data mid-test, presenting as a phantom DUT
+# mismatch. The validator's data path is in-fabric (PL↔S_AXI_HP0↔DDR), so the
+# CPU is never a producer/consumer of the payload — the only requirement is
+# that the CPU leave the ring's physical DDR alone. See docs/BRING_UP.md.
+
+kernel_image=uImage
+kernel_load_address=0x2080000
+devicetree_image=devicetree.dtb
+devicetree_load_address=0x2000000
+
+setenv bootargs "console=ttyPS0,115200 earlycon mem=256M"
+load mmc 0 ${kernel_load_address} ${kernel_image}
+load mmc 0 ${devicetree_load_address} ${devicetree_image}
+bootm ${kernel_load_address} - ${devicetree_load_address}

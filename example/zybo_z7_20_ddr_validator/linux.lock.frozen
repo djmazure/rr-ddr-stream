@@ -1,0 +1,49 @@
+version: 2
+generated_at: '2026-05-27T08:13:12+00:00'
+git:
+  project: c24457f9d3f061fa965159cd62abb0595fc97efe
+  routertl: 33dafcc1961e24fa8d6c8e9c85df63aa5a12bf87
+sources:
+  u-boot-xlnx:
+    url: https://github.com/Xilinx/u-boot-xlnx.git
+    branch: master
+    commit: a87a5c15c1c359ecd75133e63c3bf76cab19d127
+  linux-xlnx:
+    url: https://github.com/Xilinx/linux-xlnx.git
+    branch: xlnx_rebase_v6.6_LTS
+    commit: f5fffda2f301003724f1f54691fd44983137a56c
+build:
+  first_stage: xilinx-fsbl
+  first_stage_source: project.yml linux.first_stage
+  uboot_device_tree: zynq-zc706
+  uboot_defconfig: xilinx_zynq_virt_defconfig
+  uboot_config_patches:
+  - CONFIG_OF_EMBED=y
+  - CONFIG_OF_BOARD=n
+  kernel_defconfig: xilinx_zynq_defconfig
+  kernel_config_fragments:
+  - sw/linux/out/initramfs.config-fragment
+  kernel_initramfs_source: sw/linux/out/rootfs sw/linux/out/initramfs_devices.list
+  board_preset_sha: 07a63c5394432186a42fd7d69134079e96cd1511
+  ps7_hooks_shas:
+  - path: tcl_hooks/ps7_unused_off.tcl
+    sha: 79f2043beb5b2fc5e972fffaf6c0eca5a9a35462
+artefacts:
+  fsbl.elf:
+    sha256: 410b7cb6ee4c76afa4d6d6e77fcee44860e317caa0fa4f610d7c66403b467023
+    size: 653068
+  u-boot.elf:
+    sha256: 9361d14d579a160caba4994c71819c06c007876d3cde6a192d08960d9d75b25c
+    size: 8819356
+  uImage:
+    sha256: c1acf6b34b68ad09ec87d41fc077b7b3da0af1bc2f7c8b172e6d72abae333a8f
+    size: 6062864
+  system.dtb:
+    sha256: d09657def20efe71c4cc2b931c0031cc7fe593a78a1b5e9e8a11990b42257283
+    size: 11400
+  BOOT.bin:
+    sha256: ef387870226f5bf61187a63b368ceb24a25f746551b42a00314d9c57eb3f0397
+    size: 5269768
+  bitstream/rr_ddr_stream_zybo_z7_20_ddr_validator.bit:
+    sha256: b8b7ef092dea1ef6e1edd9c140c8897b9b7cc0ee33d5eb4c9287de44858b950f
+    size: 4045688

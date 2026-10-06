@@ -1,0 +1,107 @@
+version: 1
+enclustra/en_cl_fix_resize:
+  resolved_version: 0.0.0
+  url: https://github.com/enclustra/en_cl_fix.git
+  commit: d2ce1a617bc8ba466244a4e500a6edbeea6dba7a
+  local_path: libs/enclustra/en_cl_fix_resize
+  library: en_tb
+  library_deps: []
+  files:
+  - libs/enclustra/en_cl_fix_resize/hdl/en_cl_fix_private_pkg.vhd
+  - libs/enclustra/en_cl_fix_resize/hdl/en_cl_fix_pkg.vhd
+  - libs/enclustra/en_cl_fix_resize/hdl/en_cl_fix_round.vhd
+  - libs/enclustra/en_cl_fix_resize/hdl/en_cl_fix_saturate.vhd
+  - libs/enclustra/en_cl_fix_resize/hdl/en_cl_fix_resize.vhd
+  file_hashes:
+    libs/enclustra/en_cl_fix_resize/hdl/en_cl_fix_private_pkg.vhd: a9abdc510ba11b768b4ad0d6bf07b05b48547d2b1c41473ad31556324a01a400
+    libs/enclustra/en_cl_fix_resize/hdl/en_cl_fix_pkg.vhd: 92535d16b49c5b221cfe67f8a53e6894e27d1dee6c646445433168a7aa4af886
+    libs/enclustra/en_cl_fix_resize/hdl/en_cl_fix_round.vhd: 47c119f9b3c6f0f1f7630647491c047dd3c788170d71258dbd5dbe7f8f35e3a7
+    libs/enclustra/en_cl_fix_resize/hdl/en_cl_fix_saturate.vhd: 2b51a9ccc7db9a5ebfccc8b72e6fdeb75d604f5b218a9416a6f6ee8d2be79910
+    libs/enclustra/en_cl_fix_resize/hdl/en_cl_fix_resize.vhd: 3be265faf23ae3aa2d44a704fa890b1ecc00c77abf4e0baac1adb55db3b15660
+  metadata_source: index_compat
+open-logic/olo_base_fifo_async:
+  resolved_version: 4.4.1
+  url: https://github.com/open-logic/open-logic.git
+  commit: d1407a7427d9201a7bcd8c37749ec083b13006dc
+  local_path: libs/open-logic/olo_base_fifo_async
+  library: work
+  library_deps: []
+  files:
+  - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_array.vhd
+  - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_math.vhd
+  - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_logic.vhd
+  - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_string.vhd
+  - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_attribute.vhd
+  - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_cc_bits.vhd
+  - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_cc_reset.vhd
+  - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_ram_sdp.vhd
+  - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_fifo_async.vhd
+  file_hashes:
+    libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_array.vhd: 5481df24f6c0e81329b7146cb22f56b323bdcac36080f20556a8067bafaa744d
+    libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_math.vhd: 98dc671df1be2a346814662dd293e3baff9987075d9c443e1d5f7ee11473fa5d
+    libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_logic.vhd: 4f3d36350ee730470ad485adb91670cfe67a4cc744e5e84046033d1bcb2c6584
+    libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_string.vhd: 549fb9a85d30e71510f3ecc59a394c2020e890ca1276d652c9962cf51976e0d4
+    libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_attribute.vhd: 31ab339ab6d3ddce57c8b95ff813d53d56b6b0a740a594283aab35032396ad16
+    libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_cc_bits.vhd: 62ec4838dd926845b1be4f2b2df2daaaa0b7f7e828322fccdf676e68bb63c347
+    libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_cc_reset.vhd: 7ca3e388b854fa0ce5f4aaaaa8fce5291b9a691678dd9479eb0be72142a0626c
+    libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_ram_sdp.vhd: 149fae9e8cd65165b0d7f698ffe07a0618ea8a66f19c93d68e2a08c369aa0490
+    libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_fifo_async.vhd: 7891082e4366c4013f7050436bbef303418117b0ceac32b65be88288ba101faa
+  metadata_source: index_compat
+open-logic/olo_base_fifo_sync:
+  resolved_version: 4.4.1
+  url: https://github.com/open-logic/open-logic.git
+  commit: d1407a7427d9201a7bcd8c37749ec083b13006dc
+  local_path: libs/open-logic/olo_base_fifo_sync
+  library: work
+  library_deps: []
+  files:
+  - libs/open-logic/olo_base_fifo_sync/src/base/vhdl/olo_base_pkg_array.vhd
+  - libs/open-logic/olo_base_fifo_sync/src/base/vhdl/olo_base_pkg_math.vhd
+  - libs/open-logic/olo_base_fifo_sync/src/base/vhdl/olo_base_pkg_attribute.vhd
+  - libs/open-logic/olo_base_fifo_sync/src/base/vhdl/olo_base_pkg_string.vhd
+  - libs/open-logic/olo_base_fifo_sync/src/base/vhdl/olo_base_ram_sdp.vhd
+  - libs/open-logic/olo_base_fifo_sync/src/base/vhdl/olo_base_fifo_sync.vhd
+  file_hashes:
+    libs/open-logic/olo_base_fifo_sync/src/base/vhdl/olo_base_pkg_array.vhd: 5481df24f6c0e81329b7146cb22f56b323bdcac36080f20556a8067bafaa744d
+    libs/open-logic/olo_base_fifo_sync/src/base/vhdl/olo_base_pkg_math.vhd: 98dc671df1be2a346814662dd293e3baff9987075d9c443e1d5f7ee11473fa5d
+    libs/open-logic/olo_base_fifo_sync/src/base/vhdl/olo_base_pkg_attribute.vhd: 31ab339ab6d3ddce57c8b95ff813d53d56b6b0a740a594283aab35032396ad16
+    libs/open-logic/olo_base_fifo_sync/src/base/vhdl/olo_base_pkg_string.vhd: 549fb9a85d30e71510f3ecc59a394c2020e890ca1276d652c9962cf51976e0d4
+    libs/open-logic/olo_base_fifo_sync/src/base/vhdl/olo_base_ram_sdp.vhd: 149fae9e8cd65165b0d7f698ffe07a0618ea8a66f19c93d68e2a08c369aa0490
+    libs/open-logic/olo_base_fifo_sync/src/base/vhdl/olo_base_fifo_sync.vhd: 0b62cb337c4874677ec8da878d8b5483a7e0c8dbf2085e4ed25d026e36fa53c6
+  metadata_source: index_compat
+open-logic/olo_base_wconv_n2xn:
+  resolved_version: 4.4.1
+  url: https://github.com/open-logic/open-logic.git
+  commit: d1407a7427d9201a7bcd8c37749ec083b13006dc
+  local_path: libs/open-logic/olo_base_wconv_n2xn
+  library: work
+  library_deps: []
+  files:
+  - libs/open-logic/olo_base_wconv_n2xn/src/base/vhdl/olo_base_pkg_array.vhd
+  - libs/open-logic/olo_base_wconv_n2xn/src/base/vhdl/olo_base_pkg_math.vhd
+  - libs/open-logic/olo_base_wconv_n2xn/src/base/vhdl/olo_base_pkg_logic.vhd
+  - libs/open-logic/olo_base_wconv_n2xn/src/base/vhdl/olo_base_wconv_n2xn.vhd
+  file_hashes:
+    libs/open-logic/olo_base_wconv_n2xn/src/base/vhdl/olo_base_pkg_array.vhd: 5481df24f6c0e81329b7146cb22f56b323bdcac36080f20556a8067bafaa744d
+    libs/open-logic/olo_base_wconv_n2xn/src/base/vhdl/olo_base_pkg_math.vhd: 98dc671df1be2a346814662dd293e3baff9987075d9c443e1d5f7ee11473fa5d
+    libs/open-logic/olo_base_wconv_n2xn/src/base/vhdl/olo_base_pkg_logic.vhd: 4f3d36350ee730470ad485adb91670cfe67a4cc744e5e84046033d1bcb2c6584
+    libs/open-logic/olo_base_wconv_n2xn/src/base/vhdl/olo_base_wconv_n2xn.vhd: c45ec083252991c7f019cb61bd81ad509a7b275aae19699e0d26ac81dd1a9426
+  metadata_source: index_compat
+open-logic/olo_base_wconv_xn2n:
+  resolved_version: 4.4.1
+  url: https://github.com/open-logic/open-logic.git
+  commit: d1407a7427d9201a7bcd8c37749ec083b13006dc
+  local_path: libs/open-logic/olo_base_wconv_xn2n
+  library: work
+  library_deps: []
+  files:
+  - libs/open-logic/olo_base_wconv_xn2n/src/base/vhdl/olo_base_pkg_array.vhd
+  - libs/open-logic/olo_base_wconv_xn2n/src/base/vhdl/olo_base_pkg_math.vhd
+  - libs/open-logic/olo_base_wconv_xn2n/src/base/vhdl/olo_base_pkg_logic.vhd
+  - libs/open-logic/olo_base_wconv_xn2n/src/base/vhdl/olo_base_wconv_xn2n.vhd
+  file_hashes:
+    libs/open-logic/olo_base_wconv_xn2n/src/base/vhdl/olo_base_pkg_array.vhd: 5481df24f6c0e81329b7146cb22f56b323bdcac36080f20556a8067bafaa744d
+    libs/open-logic/olo_base_wconv_xn2n/src/base/vhdl/olo_base_pkg_math.vhd: 98dc671df1be2a346814662dd293e3baff9987075d9c443e1d5f7ee11473fa5d
+    libs/open-logic/olo_base_wconv_xn2n/src/base/vhdl/olo_base_pkg_logic.vhd: 4f3d36350ee730470ad485adb91670cfe67a4cc744e5e84046033d1bcb2c6584
+    libs/open-logic/olo_base_wconv_xn2n/src/base/vhdl/olo_base_wconv_xn2n.vhd: 1abc70521a8c6a60a501d44addad5c00ecd75d4a56b1dc42d4125b03768e83d8
+  metadata_source: index_compat

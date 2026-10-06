@@ -1,0 +1,29 @@
+# Linux/HSS memory map for the PolarFire SoC ddr_stream validator.
+#
+# Scaffolded for `rr linux mmap` / `rr linux sync`. SINGLE SOURCE OF TRUTH for
+# the fabric AXI memory-mapped IPs the MSS reaches over the FIC. `rr linux mmap`
+# reads it and patches the MSS SmartDesign address segments to match; `rr linux
+# sync` regenerates the device tree + UIO headers after the Libero export.
+#
+# NOTE: only the CSR (AXI4-Lite control/status, reached from the MSS over a
+# fabric AXI-Lite master) is a PS-visible memory-mapped device. The IP's DMA
+# ring lives in the NON-cached MSS DDR4 window (ddr_base 0xC000_0000, reached by
+# the FIC AXI4 master); that region is NOT a device — it is DDR carved out of the
+# HSS/Linux map so a fabric DMA write bypasses the U54 L2 cache and a PS consumer
+# sees committed data (walked up to wr_commit_addr_o) without a cache flush. The
+# validator compares IN FABRIC, so software never maps the ring.
+
+version: "1.0.0"
+# Microchip PolarFire SoC — MPFS095T (RISC-V U54/E51). Selects the riscv64
+# cross-toolchain + the mpfs-disco-kit defconfig/DTB family in the rr linux flow.
+target: mpfs-disco-kit
+
+devices:
+  # ddr_validator_csr — AXI4-Lite slave reached from the MSS over a fabric
+  # AXI-Lite master (FIC1 / an APB-AXI bridge). Software drives scenarios and
+  # reads the pass/fail verdict through this window.
+  - name: ddr_validator_csr
+    base_addr: 0x60000000     # fabric CSR window in the MSS FIC address space
+    size:      0x1000         # 4 KiB CSR window (csr_addr_width_g = 12)
+    # No `compatible` — no mainline driver; userspace reaches it via /dev/mem.
+    uio_index: 0

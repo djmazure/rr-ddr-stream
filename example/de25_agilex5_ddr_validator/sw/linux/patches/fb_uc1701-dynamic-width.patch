@@ -1,0 +1,38 @@
+diff --git a/drivers/staging/fbtft/fb_uc1701.c b/drivers/staging/fbtft/fb_uc1701.c
+index e4ccc7386..fd98903fa 100644
+--- a/drivers/staging/fbtft/fb_uc1701.c
++++ b/drivers/staging/fbtft/fb_uc1701.c
+@@ -118,17 +118,21 @@ static void set_addr_win(struct fbtft_par *par, int xs, int ys, int xe, int ye)
+ static int write_vmem(struct fbtft_par *par, size_t offset, size_t len)
+ {
+ 	u16 *vmem16 = (u16 *)par->info->screen_buffer;
++	/* Use the runtime (DT) width, not the compile-time UC1701 default of 102 —
++	 * the DE25 panel is 128 wide; a fixed 102 stride mis-walks a 128-wide vmem
++	 * and shears every page. (DE25 ST7567 LCD bring-up.) */
++	int w = par->info->var.xres;
+ 	u8 *buf;
+ 	int x, y, i;
+ 	int ret = 0;
+ 
+ 	for (y = 0; y < PAGES; y++) {
+ 		buf = par->txbuf.buf;
+-		for (x = 0; x < WIDTH; x++) {
++		for (x = 0; x < w; x++) {
+ 			*buf = 0x00;
+ 			for (i = 0; i < 8; i++)
+-				*buf |= (vmem16[((y * 8 * WIDTH) +
+-						 (i * WIDTH)) + x] ?
++				*buf |= (vmem16[((y * 8 * w) +
++						 (i * w)) + x] ?
+ 					 1 : 0) << i;
+ 			buf++;
+ 		}
+@@ -137,7 +141,7 @@ static int write_vmem(struct fbtft_par *par, size_t offset, size_t len)
+ 		write_reg(par, 0x00);
+ 		write_reg(par, LCD_COL_ADDRESS);
+ 		gpiod_set_value(par->gpio.dc, 1);
+-		ret = par->fbtftops.write(par, par->txbuf.buf, WIDTH);
++		ret = par->fbtftops.write(par, par->txbuf.buf, w);
+ 		gpiod_set_value(par->gpio.dc, 0);
+ 	}
+ 

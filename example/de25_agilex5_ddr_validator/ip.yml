@@ -1,0 +1,85 @@
+# de25_agilex5_ddr_validator — declarative vendor-IP manifest (Phase B).
+#
+# The full-datapath sibling of de25_hps_smoke: this declares the Agilex 5 HPS
+# subsystem with the FPGA↔HPS bridges ENABLED and RE-EXPORTED to the fabric top,
+# so the validator wires its datapath to them:
+#   • f2sdram (FPGA→HPS-DDR, 256-bit ACE5-Lite)  ← ddr_stream_axi m_axi4 master
+#   • lwh2f   (HPS→fabric AXI-Lite, 32-bit)       → ddr_validator_csr slave
+#
+# `rr` OWNS generation (sdk/engine/hps_preset.py): it renders the qsys-script
+# from this declaration and runs qsys-generate to emit the hps-handoff + the
+# hps_subsys wrapper. NO hand-authored gen_bd.tcl / qsys-script, NO curated
+# source list. Config values are harvested BOARD FACTS from the golden GHRD
+# (…/DE25_revD_extracted/.../GHRD/hps_subsys/), not the vendor flow.
+#
+# *** The bridge re-export (export_f2sdram / export_lwh2f) is the composed-
+# subsystem feature being taught to rr (RTL ticket filed by the hps_preset
+# work). Until it lands, the flat HPS only exports clk/reset/ninit_done and
+# this design won't wire up — that's the Phase-B gate. ***
+
+platform:
+  hps:
+    system: hps_subsys
+    vendor: altera
+
+ips:
+  # ── Agilex 5 hard processor system ──
+  - name: hps
+    type: intel_agilex_5_soc
+    vendor: altera
+    version: "13.0.0"           # tool fact (Quartus Pro 25.3); GHRD 9.0.0 rejected
+    config:
+      # ── FROZEN golden HPS .ip (RTL-P3.722 Option A — the silent-boot fix) ──
+      # The default add_instance flow black-boxes the Agilex 5 HPS as a Generic
+      # Component in standalone pre-synth generation, so the IO48 pin-mux QIP
+      # (UART1:TX / SDMMC / EMAC0 → physical pins) NEVER builds → SPL console TX
+      # routed nowhere → 0 bytes on UART1, silent boot. Setting hps_frozen makes
+      # rr add the GUI-FROZEN golden agilex_hps.ip by FILE (add_component) — the
+      # IDENTICAL pattern hps_emif uses for the io96b EMIF (RTL-P3.733). The
+      # frozen .ip carries the full IO48 pin-mux baked in, so the per-peripheral
+      # *_Mode/_PinMuxing params + hps_pinmux.yml are DEAD; the hps_io conduit
+      # (48 physical HPS pins) is re-exported at the hps_subsys top, wired to the
+      # board HPS-dedicated pins in top_de25_ddr_validator.vhd. Validated
+      # v9.0.0-on-Quartus-Pro-25.3 (2026-06-07): add_component dodges the version
+      # gate, qsys-generate emits all 48 hps_io_* ports incl hps_io_uart1_tx.
+      # The harvested agilex_hps.ip is vendored at ip/agilex_hps/agilex_hps.ip
+      # (a board fact, like the EMIF .ip / a pinout).
+      hps_frozen: true
+      boot_device: SDMMC
+      sdmmc_mode: "4-bit"
+      uart_mode: "No_flow_control"      # UART1 console (0x10c02100, ttyS1)
+      emac0_mode: "RGMII_with_MDIO"     # EMAC0 — also the Phase-B Ethernet dev loop
+      emac0_gtx_clk_mhz: 125.0
+      h2f_width: 0                       # full-rate h2f unused (CSR rides lwh2f)
+      lwh2f_width: 32                    # lightweight HPS→fabric AXI-Lite → CSR
+      # *** f2sdram ENABLED (vs the de25_hps_smoke heartbeat which sets 0). ***
+      # 256-bit ACE5-Lite FPGA→HPS-DDR datapath; ddr_stream_axi's m_axi4 master
+      # drives it (via a width adapter — the IP is 128-bit native, see the top).
+      f2sdram_width: 256
+      f2sdram_mode: "ace5lite"
+      f2sdram_address_width: 32
+      f2s_width: 0                       # coherent fpga2hps unused
+      eosc1_clk_mhz: 25.0
+      f2h_free_clk_mhz: 125              # fabric datapath clock (clk_ddr analog)
+      fabric_clk_mhz: 100.0              # fabric system clock (clk_sys analog)
+      # ── RTL-P3.xxx composed-subsystem bridge re-export (Phase B) ──
+      # Re-export the bridge AXI interfaces at the hps_subsys top so fabric RTL
+      # can connect the datapath. (Exact knob names reconciled with the
+      # hps_preset re-export feature; see the top's hps_subsys component.)
+      export_f2sdram: true               # expose the f2sdram AXI slave + its clk/reset
+      export_lwh2f: true                 # expose the lwh2f AXI-Lite master + its clk/reset
+      # ── HPS DDR4 memory controller (io96b EMIF, RTL-P3.722) ──
+      # THE boot fix: without an EMIF the HPS has no DRAM controller, so the
+      # U-Boot SPL never relocates and the UART console is dead silent (the
+      # observed RTL-P3.722 symptom). Enabling this:
+      #   • sets EMIF_AXI_Enable=1 / EMIF_Topology=1 on the HPS,
+      #   • adds the harvested configured emif_io96b_hps instance (the io96b
+      #     DDR4 controller — a BOARD FACT vendored at ip/emif_io96b_hps/
+      #     emif_io96b_hps.ip, carrying EMIF_PROTOCOL=DDR4_COMP + the DDR4
+      #     timings, NOT re-derived),
+      #   • connects hps.io96b0_to_hps ↔ emif_hps.io96b0_to_hps,
+      #   • exports the DDR4 physical pins (emif_mem_0_* / emif_mem_ck_0_* /
+      #     emif_mem_reset_n_*), the OCT (emif_oct_0_oct_rzqin) and the
+      #     board-driven refclk (emif_ref_clk_clk, DDR4_REFCLK 150 MHz) at the
+      #     hps_subsys top — see docs/HPS_SUBSYS_PORT_CONTRACT.md.
+      hps_emif: true

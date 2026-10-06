@@ -1,0 +1,40 @@
+# runtimes/hw.yml — rr.hw.contract/v1 BIST recipe for the Zybo Classic DDR validator.
+#
+# SPDX-FileCopyrightText: 2026 Daniel J. Mazure
+# SPDX-License-Identifier: MIT
+
+schema: "rr.hw.contract/v1"
+version: 0.1
+
+requirements:
+  - id: "BIST-DDR-001"
+    description: >-
+      DDR fabric BIST: the roundtrip scenario completes with STATUS done+pass
+      and zero mismatches on the 0x4000_0000 validator CSR window.
+    expected_outcome: "pass"
+    target:
+      board: "zybo"
+    preconditions:
+      - name: "bitstream_loaded"
+        via: "rr hw bist zybo --bitstream ddr_validator.bit (TFTP + fpga loadb over U-Boot)"
+    steps:
+      - {idx: 1, kind: "peek",     addr: "0x4000003c", expected: "0x0dd50200",
+         comment: "IDENT magic — confirm the validator CSR is alive before kicking a run"}
+      - {idx: 2, kind: "poke",     addr: "0x40000008", value: "0x00000000",
+         comment: "SCENARIO = 0 (roundtrip)"}
+      - {idx: 3, kind: "poke",     addr: "0x40000000", value: "0x00000001",
+         comment: "CTRL.start (write-1-to-pulse) — kick the run"}
+      - {idx: 4, kind: "wait_for", addr: "0x40000004", mask: "0x00000002",
+         expected: "0x00000002", timeout_s: 15.0,
+         comment: "STATUS.done rises when the roundtrip finishes"}
+      - {idx: 5, kind: "peek",     addr: "0x40000004", expected: "0x00000036",
+         comment: "STATUS == done|pass|write_idle|read_idle (0x36); running=0, fail=0"}
+      - {idx: 6, kind: "peek",     addr: "0x40000010", expected: "0x00000000",
+         comment: "ERROR_COUNT == 0 — no word mismatches this run"}
+    assertions:
+      - {id: "A1", expr: "step[1].observed == step[1].expected"}
+      - {id: "A2", expr: "step[4].satisfied == true"}
+      - {id: "A3", expr: "step[5].observed == step[5].expected"}
+      - {id: "A4", expr: "step[6].observed == step[6].expected"}
+    evidence_required:
+      - console_log

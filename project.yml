@@ -1,0 +1,89 @@
+# Development-workspace project.yml for rr_ddr_stream.
+#
+# Companion to ip.yml. `rr pkg add` workflow needs a project.yml to
+# record sibling-IP dependencies in (Gap #9, tich-super RTL-P3.473).
+#
+# Hardware target is the same Xilinx-7 placeholder rr-vfifo used; the
+# AXI backend exercises the same surface. The Intel/AVMM TOP
+# (ddr_stream_avmm) lands under DDR-P3.1 with its own project.yml-equivalent
+# Intel target.
+
+project:
+  name: rr_ddr_stream
+  top_module: ddr_stream_axi
+  top_sim: tb_ddr_stream_axi
+
+hardware:
+  vendor: xilinx
+  part: xc7z020clg400-1     # placeholder — matches rr-vfifo's lineage
+  language: vhdl
+  platform: default
+
+simulation:
+  test_dir: sim/cocotb/tests
+  waves_dir: sim/cocotb/waves
+  logs_dir: sim/cocotb/logs
+  simulator: nvc
+
+packages:
+  open-logic/olo_base_fifo_async: ^4.4.1
+  open-logic/olo_base_fifo_sync: ^4.4.1
+  open-logic/olo_base_wconv_n2xn: ^4.4.1
+  open-logic/olo_base_wconv_xn2n: ^4.4.1
+  enclustra/en_cl_fix_resize: ^d2ce1a617bc8
+
+# RR--T2.1 / RR--P3.7 (2026-05-18) — pre-commit policy.
+#
+# Lint + ~10s leaf smoke (test_ptr_mgr + test_ddr_validator_csr) on every
+# commit. Both are dependency-light leaf units (ptr_mgr: package-free;
+# ddr_validator_csr: ieee-only AXI-Lite slave under example/), so neither
+# touches the olo registry blocker. Routertl
+# RTL-P2.597 shipped the pure-routertl consumer hook (sdk/infra/hooks/
+# project-pre-commit now drives lint / clean / regression / per-test
+# sim through `rr` instead of make), so no Makefile shim is needed.
+#
+# Full FIFO regression (axi / avmm / plane_elision) waits on
+# routertl RTL-P3.536 (hooks.pre_push.* schema).
+hooks:
+  pre_commit:
+    enabled: true
+    lint: true
+    check_yaml: true
+    tests: [test_ptr_mgr, test_ddr_validator_csr, test_lwh2f_csr_bridge, test_de25_nal_rom, test_de25_lwh2f_nal]
+    exclude:
+      tests: []
+
+paths:
+  sources:
+  - rtl
+  - libs
+
+# DDR-T3.5 (2026-07-16) — explicit library placement for the vendor-gated
+# FIFO xpm-body entities, lint-side.
+#
+# routertl RTL-P3.1096 made the resolver's library auto-discovery skip
+# COLLIDING design-unit names (rr_fifo_{sync,async,async_mixed}_xpm_body is
+# declared by BOTH rtl/support/xilinx/*_xpm_body.vhd and the GHDL-safe
+# rtl/support/intel/*_xpm_body_stub.vhd), deferring instead to each file's
+# ip.lock/ip.yml provenance. Consumers get that provenance via ip.lock
+# synth_only_files (RTL-P3.722), but in THIS repo — the IP's own dev
+# workspace, linting itself — there is no lock entry for the IP, so NEITHER
+# body reached library `rr` and GHDL failed the rr_fifo_* wrappers with
+# `unit "rr_fifo_*_xpm_body" not found in library "rr"`.
+#
+# Fix: explicitly place the vendor-NEUTRAL Intel stubs (pure entity decls,
+# no `library xpm`) into library rr via sources.libraries (RTL-T2.35 /
+# RTL-P2.892), which `rr lint` materialises into .routertl_cache/
+# libraries.json before smart_linter runs. This is exactly the body set a
+# GHDL lint is meant to compile (RTL-P3.803: lint drops XPM bodies in
+# favour of stubs whenever both are present). Synthesis is untouched: the
+# Vivado/Quartus read set still comes from the resolver + ip.yml
+# synthesis.sources_per_vendor.<vendor> (g_libraries is only a
+# file→library map applied to files already in the read set), so Xilinx
+# builds keep the real XPM bodies.
+sources:
+  libraries:
+    rr:
+      - rtl/support/intel/rr_fifo_sync_xpm_body_stub.vhd
+      - rtl/support/intel/rr_fifo_async_xpm_body_stub.vhd
+      - rtl/support/intel/rr_fifo_async_mixed_xpm_body_stub.vhd

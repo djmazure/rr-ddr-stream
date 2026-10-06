@@ -1,0 +1,28 @@
+# DE25-Standard (Agilex 5) LED blinky — bench bring-up smoke.
+# Validates the Quartus Pro synth→fit→bitstream→program path on the real board
+# before the HPS work (RTL-P3.681/682). Pure fabric; uses platform: de25-standard
+# to bind CLOCK2_50 (1.2 V, pin BM71) + LEDR from boards/de25-standard/pinout.yml.
+# (CLOCK0_50 is LVCMOS33 → "3.3-V LVTTL", rejected on Agilex 5 — RTL-P3.675.)
+# Validated on real silicon 2026-06-03: programmed via `rr program run`, IDCODE 4364C0DD.
+project:
+  name: de25_led_smoke
+  top_module: de25_led_smoke
+
+hardware:
+  vendor: altera
+  part: "A5ED013BB32AE4SCS"
+  language: vhdl
+  platform: de25-standard
+  edition: pro
+  tool_path: /opt/altera_pro/25.3
+
+build_options:
+  tool_version: "25.3"
+
+sources:
+  syn:
+    - src/de25_led_smoke.vhd
+
+paths:
+  sources:
+    - src

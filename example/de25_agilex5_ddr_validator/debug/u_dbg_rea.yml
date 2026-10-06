@@ -1,0 +1,43 @@
+# debug/u_dbg_rea.yml — REA (RouteRTL Embedded Analyzer) instance for the DE25
+# lwh2f CSR read-abort bring-up (RTL-P3.739).
+#
+# Per D.67 the filename owns the core name ('u_dbg_rea'); per D.69 type 'rea'.
+# sample_width/depth/clock MUST match the rr_rea_intel instantiation in
+# src/top_de25_ddr_validator.vhd. Probes are LSB-first in the probe_in word.
+#
+# DIAGNOSTIC INTENT: arm with the lw_arvalid trigger, then `devmem 0x2000003C`
+# from the HPS. (RTL-P3.739 RESOLVED 2026-06-08: lwh2f base is 0x20000000, NOT
+# 0xF9000000 — the latter decodes to no CCU region and aborts. 0x2000003C reads
+# IDENT 0x0DD50200 and REA confirms lw_arvalid asserts.) Outcomes:
+#   • capture NEVER triggers (lw_arvalid never asserts) → the read is blocked
+#     HPS-side (NoC firewall / brgmodrst), NOT the fabric.
+#   • triggers but ninit_done=1 / no lw_arready,lw_rvalid → fabric held in reset
+#     (ninit_done stuck) or CSR dead.
+#   • triggers, lw_rvalid + data come back, HPS still aborts → response blocked
+#     on the return path (firewall).
+
+type: rea
+sample_width: 16
+depth: 4096
+sample_clock_hz: 50000000        # CLOCK2_50
+
+probes:
+  - { signal: ninit_done, width: 1 }   # [0] fabric reset-release (HIGH = still in reset)
+  - { signal: rst_sys,    width: 1 }   # [1] CSR functional reset (active-high)
+  - { signal: lw_arvalid, width: 1 }   # [2] read request crossed into the fabric
+  - { signal: lw_arready, width: 1 }   # [3] bridge/CSR accepted the read
+  - { signal: lw_rvalid,  width: 1 }   # [4] CSR drove read data back
+  - { signal: lw_awvalid, width: 1 }   # [5] write request
+  - { signal: lw_wvalid,  width: 1 }   # [6] write data
+  - { signal: lw_awready, width: 1 }   # [7]
+  - { signal: lw_wready,  width: 1 }   # [8]
+  - { signal: lw_bvalid,  width: 1 }   # [9] write response
+  - { signal: lw_araddr,  width: 6 }   # [15:10] CSR offset of the read
+
+# Event-aligned capture: trigger when a read request reaches the fabric boundary.
+trigger:
+  mode: value_match
+  pretrigger:  512
+  posttrigger: 3583
+  conditions:
+    - { signal: lw_arvalid, value: 1 }
