@@ -114,10 +114,17 @@ package body functions_pkg is
         end loop;
         if overflow then
           result := (others => '1');
-        else
+        elsif result /= 0 then
           -- As we want the result in bursts, if distance is 1, the burst is 0
           result := result -1;
         end if;
+        -- DDR-T2.23: a distance below one beat holds no whole beat. The
+        -- subtraction above used to wrap that to 255 (a full-size burst); it
+        -- now stays 0, a one-beat burst. burstw_setter reaches 0 at the ring's
+        -- last slot (ptr_mgr forces diff_o to all ones at write + one beat =
+        -- read), where one beat is free. A 4 KiB distance below one beat is a
+        -- pointer inside the page's last beat. A partial beat of ring data or
+        -- ring space is refused by the setters' no-whole-beat checks.
         -- ... but the burst size is limited not only by the AXI4 spec but also by the design
         -- if the number of bytes per beat is, e.g, 64, the maximum burst length is 64 (64x64=4096)
         if result >= C_MAX_DESIGN_BURST then

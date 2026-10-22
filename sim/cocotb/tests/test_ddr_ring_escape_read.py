@@ -17,6 +17,8 @@ from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge, ClockCycles, Timer
 from cocotbext.axi import AxiBus, AxiRam
 
+from test_ddr_swptr_fill import _ReadLog  # type: ignore
+
 try:
     from engine.simulation import run_simulation  # type: ignore
 except ImportError:
@@ -65,7 +67,9 @@ _GENERICS = {
 LEAD = RING_WIN // 4
 
 
-async def _pulse_wr_ptr(dut, offset: int):
+async def _pulse_wr_ptr(dut, offset: int, log: _ReadLog | None = None):
+    if log is not None:
+        log.published = offset & (RING_WIN - 1)
     dut.CSR_WR_PTR_ADDR.value = offset & (RING_WIN - 1)
     dut.CSR_WR_PTR_LOAD.value = 1
     await RisingEdge(dut.CLK_SYS)
@@ -87,7 +91,8 @@ async def araddr_stays_in_ring_window(dut):
 
     ram = AxiRam(AxiBus.from_prefix(dut, "M_AXI"), dut.CLK_DDR, dut.RST_DDR, size=ADDR_SP)  # noqa: F841
 
-    ar: list[int] = []
+    log = _ReadLog(RING_WIN)
+    ar = log.ar
     escaped: list[int] = []
 
     async def watch_ar():
@@ -96,7 +101,7 @@ async def araddr_stays_in_ring_window(dut):
             try:
                 if int(dut.M_AXI_ARVALID.value) == 1 and int(dut.M_AXI_ARREADY.value) == 1:
                     a = int(dut.M_AXI_ARADDR.value)
-                    ar.append(a)
+                    log.accept(a, int(dut.M_AXI_ARLEN.value))
                     if not (0 <= a < RING_WIN):     # escaped the ring window
                         escaped.append(a)
             except ValueError:
@@ -111,14 +116,16 @@ async def araddr_stays_in_ring_window(dut):
 
     dut.M_AXIS_READY.value = 1
     dut.CSR_WR_PTR_LOAD.value = 0
-    await _pulse_wr_ptr(dut, LEAD)
+    await _pulse_wr_ptr(dut, LEAD, log)
 
+    # Lead the read pointer the last burst leaves behind, not its ARADDR
+    # (DDR-T2.23, see _read_end in test_ddr_swptr_fill).
     async def sw_producer():
         while True:
             for _ in range(16):
                 await RisingEdge(dut.CLK_SYS)
             if ar:
-                await _pulse_wr_ptr(dut, (ar[-1] + LEAD) % RING_WIN)
+                await _pulse_wr_ptr(dut, (log.read_end() + LEAD) % RING_WIN, log)
     cocotb.start_soon(sw_producer())
 
     await Timer(160, units="us")
@@ -132,6 +139,10 @@ async def araddr_stays_in_ring_window(dut):
            RING_WIN, wraps, len(escaped)))
 
     assert ar, "no AR handshakes — downloader never read"
+    assert not log.overreads, (
+        "%d read burst(s) read PAST the software write pointer — data the "
+        "producer never wrote (DDR-REQ-502 is lossless SPSC). First: %s"
+        % (len(log.overreads), log.overreads[:4]))
     # Primary guard (the precise DS-T2.23 signature): the read address must
     # never leave the ring window. On the buggy RTL it climbs toward the address
     # space (2^ADDR_W) and this trips immediately.

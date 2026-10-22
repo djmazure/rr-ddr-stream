@@ -23,6 +23,7 @@ from test_ddr_swptr_fill import (  # type: ignore
     RING,
     _GENERICS,
     _custom_libraries,
+    _read_end,
 )
 
 try:
@@ -100,12 +101,15 @@ async def _sample_reset_window(dut, cycles: int = RESET_BUSY_DDR_CYCLES) -> dict
     return counts
 
 
-async def _watch_ar_handshakes(dut, ar: list[int]) -> None:
+async def _watch_ar_handshakes(dut, ar: list[int],
+                               arlen: list[int] | None = None) -> None:
     while True:
         await RisingEdge(dut.CLK_DDR)
         arvalid = _safe_int(dut.M_AXI_ARVALID)
         arready = _safe_int(dut.M_AXI_ARREADY)
         if arvalid == 1 and arready == 1:
+            if arlen is not None:
+                arlen.append(int(dut.M_AXI_ARLEN.value))
             ar.append(int(dut.M_AXI_ARADDR.value))
 
 
@@ -199,19 +203,22 @@ async def mid_stream_reset_recovery(dut):
     await _cold_reset_settle(dut)
 
     ar: list[int] = []
+    arlen: list[int] = []
     awvalid_seen: list[int] = []
-    cocotb.start_soon(_watch_ar_handshakes(dut, ar))
+    cocotb.start_soon(_watch_ar_handshakes(dut, ar, arlen))
     cocotb.start_soon(_watch_awvalid(dut, awvalid_seen))
 
     dut.M_AXIS_READY.value = 1
     await _pulse_wr_ptr(dut, LEAD)
 
+    # Lead the read pointer the last burst leaves behind, not its ARADDR
+    # (DDR-T2.23, see _read_end in test_ddr_swptr_fill).
     async def sw_producer() -> None:
         while True:
             for _ in range(16):
                 await RisingEdge(dut.CLK_SYS)
             if ar:
-                await _pulse_wr_ptr(dut, (ar[-1] + LEAD) % RING)
+                await _pulse_wr_ptr(dut, (_read_end(ar[-1], arlen[-1]) + LEAD) % RING)
 
     producer = cocotb.start_soon(sw_producer())
     await _wait_for_ar_count(dut, ar, 2, 5000)

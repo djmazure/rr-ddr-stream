@@ -44,7 +44,11 @@ license: MIT
 # 0.3.5 (2026-10-22): first release through the public GitHub mirror (DDR-P2.31):
 # the registry records the public repository, so anonymous installs work. Adds the
 # functions_pkg fixes and the FDD landed since 0.3.4; three comment lines scrubbed.
-version: "0.3.5"
+# 0.3.6 (2026-10-23): fixes the ring read path that made the 0.3.5 publish gate
+# refuse (DDR-T2.23): a ring distance under one beat no longer sizes a 256-beat
+# burst, so a sub-beat software pointer neither over-reads nor overwrites unread
+# data. 0.3.5 was tagged but never published to the registry.
+version: "0.3.6"
 
 hdl:
   # AXI is the v1 TOP. AVMM ships alongside it (DDR-P3.1, 2026-05-15)

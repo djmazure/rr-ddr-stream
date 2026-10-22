@@ -89,9 +89,55 @@ BURST = _GENERICS["G_DDR_DATA_WIDTH"] // 8   # 16 bytes / beat
 LEAD = RING // 4
 
 
+def _read_end(araddr: int, arlen: int, ring: int = RING) -> int:
+    """Ring offset of the read pointer once the burst at `araddr` completes.
+
+    DDR-T2.23: the software producer leads THIS, not ARADDR. ARADDR is the read
+    pointer when the burst starts. Keyed on ARADDR, the producer publishes the
+    same write pointer again after a burst that read all it had produced, and
+    the ring stays empty. That producer only advanced while the 12-bit ring's
+    distance clamp was dead (before DDR-T3.6): every read burst was then sized
+    for 256 beats and read past the write pointer, which moved ARADDR on."""
+    return (araddr + (arlen + 1) * BURST) % ring
+
+
+def _overread(araddr: int, arlen: int, published: int, ring: int = RING) -> int:
+    """Bytes a read burst takes past the write pointer published so far (0 when
+    it stays inside the produced data). The DUT sees a published pointer only
+    after the CDC, so the latest published value is never behind the one the
+    DUT sized the burst against."""
+    produced = (published - araddr) % ring
+    return max(0, (arlen + 1) * BURST - produced)
+
+
+class _ReadLog:
+    """Every AR the DUT accepted, checked against the write pointer the software
+    producer has published (DDR-REQ-502: the reader takes only produced data)."""
+
+    def __init__(self, ring: int = RING) -> None:
+        self.ring = ring
+        self.published = 0
+        self.ar: list[int] = []
+        self.arlen: list[int] = []
+        self.overreads: list[str] = []
+
+    def accept(self, araddr: int, arlen: int) -> None:
+        past = _overread(araddr, arlen, self.published, self.ring)
+        if past:
+            self.overreads.append(
+                "ARADDR 0x%x ARLEN %d with write ptr 0x%x: %d B past it"
+                % (araddr, arlen, self.published, past))
+        self.ar.append(araddr)
+        self.arlen.append(arlen)
+
+    def read_end(self) -> int:
+        return _read_end(self.ar[-1], self.arlen[-1], self.ring)
+
+
 async def _bootstrap(dut):
     """Start clocks, hold reset past the DUT's warm-up, pre-load an AxiRam read
-    slave, and arm the AR monitor. Returns (ram, ar, escaped)."""
+    slave, and arm the AR monitor. Returns (ram, log, escaped); log.ar is the
+    list of accepted ARADDR."""
     cocotb.start_soon(Clock(dut.CLK_SYS, CLK_SYS_NS, units="ns").start())
     cocotb.start_soon(Clock(dut.CLK_DDR, CLK_DDR_NS, units="ns").start())
     dut.RST_SYS.value          = 1
@@ -110,7 +156,7 @@ async def _bootstrap(dut):
 
     ram = AxiRam(AxiBus.from_prefix(dut, "M_AXI"), dut.CLK_DDR, dut.RST_DDR, size=RING)
 
-    ar: list[int] = []
+    log = _ReadLog()
     escaped: list[int] = []
 
     async def watch_ar():
@@ -119,7 +165,7 @@ async def _bootstrap(dut):
             try:
                 if int(dut.M_AXI_ARVALID.value) == 1 and int(dut.M_AXI_ARREADY.value) == 1:
                     a = int(dut.M_AXI_ARADDR.value)
-                    ar.append(a)
+                    log.accept(a, int(dut.M_AXI_ARLEN.value))
                     if not (0 <= a < RING):
                         escaped.append(a)
             except ValueError:
@@ -130,7 +176,7 @@ async def _bootstrap(dut):
     dut.RST_SYS.value = 0
     dut.RST_DDR.value = 0
     await ClockCycles(dut.CLK_DDR, 80)
-    return ram, ar, escaped
+    return ram, log, escaped
 
 
 def _count_wraps(ptr: list[int]) -> int:
@@ -139,10 +185,12 @@ def _count_wraps(ptr: list[int]) -> int:
     return sum(1 for i in range(len(ptr) - 1) if ptr[i + 1] < ptr[i])
 
 
-async def _pulse_wr_ptr(dut, offset: int):
+async def _pulse_wr_ptr(dut, offset: int, log: _ReadLog | None = None):
     """Drive CSR_WR_PTR_ADDR + a ONE-cycle clk_sys load strobe — exactly how a
     regbank write-strobe drives the multi-bit MCP CDC. The address is held stable
     on the port between pulses (a real host register does the same)."""
+    if log is not None:
+        log.published = offset & (RING - 1)
     dut.CSR_WR_PTR_ADDR.value = offset & (RING - 1)
     dut.CSR_WR_PTR_LOAD.value = 1
     await RisingEdge(dut.CLK_SYS)
@@ -154,7 +202,8 @@ async def _pulse_wr_ptr(dut, offset: int):
 async def sw_write_ptr_lets_ring_wrap(dut):
     """With the write plane off, a software write pointer that leads the read
     pointer must let the ring WRAP repeatedly — sustained, lossless reads."""
-    _ram, ar, escaped = await _bootstrap(dut)
+    _ram, log, escaped = await _bootstrap(dut)
+    ar = log.ar
 
     # Perpetual consumer: hold M_AXIS_READY high so the downloader keeps draining
     # its FIFO and re-fetching from DDR (max-throughput reader).
@@ -162,17 +211,18 @@ async def sw_write_ptr_lets_ring_wrap(dut):
 
     # Seed: give the reader an initial quarter-ring of "produced" data so it can
     # start (chicken-and-egg — no AR is issued until write_ptr > read_ptr).
-    await _pulse_wr_ptr(dut, LEAD)
+    await _pulse_wr_ptr(dut, LEAD, log)
 
-    # SW producer: keep the write pointer a steady LEAD ahead of the observed read
-    # pointer (ARADDR ≈ downloader read pointer, base=0). ptr_mgr does the modulo
-    # wrap, so (read + LEAD) mod RING is always exactly LEAD of available data.
+    # SW producer: keep the write pointer a steady LEAD ahead of the read pointer
+    # the last accepted burst leaves behind (its ARADDR + its length; base=0).
+    # ptr_mgr does the modulo wrap, so (read + LEAD) mod RING is always exactly
+    # LEAD of available data. DDR-T2.23: see _read_end.
     async def sw_producer():
         while True:
             for _ in range(16):
                 await RisingEdge(dut.CLK_SYS)
             if ar:
-                await _pulse_wr_ptr(dut, (ar[-1] + LEAD) % RING)
+                await _pulse_wr_ptr(dut, (log.read_end() + LEAD) % RING, log)
     cocotb.start_soon(sw_producer())
 
     # Let the read side run for many rings' worth of bursts.
@@ -185,6 +235,10 @@ async def sw_write_ptr_lets_ring_wrap(dut):
         % (len(ar), min(ar) if ar else -1, max(ar) if ar else -1, wraps))
 
     assert ar, "no AR handshakes observed — the downloader never read (write ptr not seen?)"
+    assert not log.overreads, (
+        "%d read burst(s) read PAST the software write pointer — data the "
+        "producer never wrote (DDR-REQ-502 is lossless SPSC). First: %s"
+        % (len(log.overreads), log.overreads[:4]))
     assert not escaped, (
         "ARADDR ESCAPED the ring window [0,0x%x): %s — a burst overshot the wrap "
         "(symmetric axi4r wrap bug?)." % (RING, [hex(x) for x in escaped[:8]]))
@@ -202,7 +256,8 @@ async def no_sw_write_ptr_stays_empty(dut):
     (load held low), the ring must stay EMPTY — the downloader issues NO reads,
     byte-identical to the legacy tied-to-uploader_addr (=0) write pointer. Proves
     the new CSR is strictly opt-in."""
-    _ram, ar, escaped = await _bootstrap(dut)
+    _ram, log, escaped = await _bootstrap(dut)
+    ar = log.ar
 
     # DDR-REQ-401: with G_ENABLE_WRITE_PLANE=false there is no HW uploader, so the IP
     # must NEVER issue a write burst — a parallel passive sampler watches `M_AXI_AWVALID`

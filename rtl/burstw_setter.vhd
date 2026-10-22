@@ -86,6 +86,8 @@ architecture RTL of burstw_setter is
   signal PtrFullDistance      : unsigned(buffer_width_g - 1 downto 0)           := (others => '0');
   signal PtrFullBurst         : unsigned(C_MAX_LEN_WIDTH - 1 downto 0)          := (others => '0');
   signal PtrFullBurst_r       : unsigned(C_MAX_LEN_WIDTH - 1 downto 0)          := (others => '0');
+  signal PtrFreeBytes         : unsigned(buffer_width_g - 1 downto 0)           := (others => '0');
+  signal PtrNoBeat_r          : std_logic                                       := '0';
   signal ddrCnt               : unsigned(buffer_width_g - 1 downto 0)           := (others => '0');
 
   signal ddrFull              : std_logic;
@@ -136,6 +138,9 @@ begin
   PtrFullDistance <= C_BUFFER_SIZE - ddrCnt;
 
   PtrFullBurst <= get_burst_from_distance(PtrFullDistance, C_BYTES_PER_BEAT);
+  -- DDR-T2.23: bytes from the write pointer to the read pointer. 0 is the
+  -- empty ring or the full ring (ddrFull tells them apart).
+  PtrFreeBytes <= unsigned(ptr_read_i(buffer_width_g - 1 downto 0)) - unsigned(ptr_write_i(buffer_width_g - 1 downto 0));
  -- This counts holds many "bursts" are left to become full
   --------------------------------------------------------------------------------------------------
   -- This process sets the size of the burst depending on the actual number of words to be sent and
@@ -156,6 +161,19 @@ begin
       -- registered free space is the same or smaller than the live one.
       --------------------------------------------------------------------------
       PtrFullBurst_r <= PtrFullBurst;
+      --------------------------------------------------------------------------
+      -- DDR-T2.23: less than one whole beat free. A software read pointer is a
+      -- byte offset, so the consumer can free part of a beat. A write burst
+      -- there overwrites bytes the reader has not consumed. Exactly one beat
+      -- free (write + one beat = read) is not flagged: that beat is the ring's
+      -- last slot, and writing it fills the ring (ddrFull, DDR-REQ-501).
+      -- Registered with PtrFullBurst_r and checked when the latch reaches s3.
+      --------------------------------------------------------------------------
+      if PtrFreeBytes /= 0 and PtrFreeBytes < C_BYTES_PER_BEAT then
+        PtrNoBeat_r <= '1';
+      else
+        PtrNoBeat_r <= '0';
+      end if;
       --
       latch_data_cnt_s2_r <= latch_data_cnt_s1_r;
       latch_data_cnt_s3_r <= latch_data_cnt_s2_r;
@@ -233,7 +251,12 @@ begin
         end if;
       when WAIT_LATCH =>
         if latch_data_cnt_s3_r = '1' then
-          fsm_burst_n <= SET_TRANSFER;
+          if PtrNoBeat_r = '1' then
+            -- DDR-T2.23: no whole beat free, issue nothing.
+            fsm_burst_n <= IDLE;
+          else
+            fsm_burst_n <= SET_TRANSFER;
+          end if;
         end if;
       when SET_TRANSFER =>
         fsm_burst_n <= ACK_TRANSFER;

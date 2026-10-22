@@ -90,6 +90,7 @@ architecture RTL of burstr_setter is
   signal PtrEmptyDistance     : unsigned(buffer_width_g-1 downto 0)                  := (others => '0');
   signal PtrEmptyBurst        : unsigned(C_MAX_LEN_WIDTH-1 downto 0)                 := (others => '0');
   signal PtrEmptyBurst_r      : unsigned(C_MAX_LEN_WIDTH-1 downto 0)                 := (others => '0');
+  signal PtrNoBeat_r          : std_logic                                            := '0';
 
   signal DdrEmpty        : std_logic;
   -- Data Count is in fact "beat" counting
@@ -162,6 +163,19 @@ begin
       -- amount is the same or smaller than the live one.
       --------------------------------------------------------------------------
       PtrEmptyBurst_r <= PtrEmptyBurst;
+      --------------------------------------------------------------------------
+      -- DDR-T2.23: less than one whole beat in the ring. A software write
+      -- pointer is a byte offset, so the producer can publish part of a beat.
+      -- Such a distance is not empty, yet holds no beat to read, and a read
+      -- burst there takes data the producer never wrote. A zero distance with
+      -- DdrEmpty='0' is the full ring and is not flagged. Registered with
+      -- PtrEmptyBurst_r and checked when the latch reaches s3.
+      --------------------------------------------------------------------------
+      if PtrEmptyDistance /= 0 and PtrEmptyDistance < C_BYTES_PER_BEAT then
+        PtrNoBeat_r <= '1';
+      else
+        PtrNoBeat_r <= '0';
+      end if;
       --
       latch_data_cnt_s2_r <= latch_data_cnt_s1_r;
       latch_data_cnt_s3_r <= latch_data_cnt_s2_r;
@@ -240,7 +254,12 @@ begin
         end if;
       when WAIT_LATCH =>
         if latch_data_cnt_s3_r = '1' then
-          fsm_burst_n <= SET_TRANSFER;
+          if PtrNoBeat_r = '1' then
+            -- DDR-T2.23: no whole beat produced yet, issue nothing.
+            fsm_burst_n <= IDLE;
+          else
+            fsm_burst_n <= SET_TRANSFER;
+          end if;
         end if;
       when SET_TRANSFER =>
         fsm_burst_n <= ACK_TRANSFER;
