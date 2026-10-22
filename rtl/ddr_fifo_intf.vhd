@@ -347,7 +347,8 @@ begin
 
       i_sync_cdc_empty : entity rr.ddr_sync_cdc
       generic map(
-        num_stages_g => C_CDC_NUM_STAGES
+        num_stages_g => C_CDC_NUM_STAGES,
+        rst_val_g    => '1'
         )
       port map
       (

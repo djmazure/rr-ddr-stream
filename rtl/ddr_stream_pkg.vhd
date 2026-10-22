@@ -36,7 +36,7 @@ package ddr_stream_pkg is
   -----------------------------------------------------------------------------
   constant C_DDR_STREAM_VER_MAJOR : natural := 0;
   constant C_DDR_STREAM_VER_MINOR : natural := 3;
-  constant C_DDR_STREAM_VER_PATCH : natural := 3;   -- ip.yml: version "0.3.3"
+  constant C_DDR_STREAM_VER_PATCH : natural := 5;   -- ip.yml: version "0.3.5"
 
   constant C_DDR_STREAM_VERSION : std_logic_vector(31 downto 0) :=
       std_logic_vector(to_unsigned(C_DDR_STREAM_VER_MAJOR, 8))

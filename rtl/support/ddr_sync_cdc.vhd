@@ -25,13 +25,14 @@ use IEEE.std_logic_misc.all;
 
 entity ddr_sync_cdc is
   generic (
-    num_stages_g : integer := 3;
-    or_reduce_g  : boolean := FALSE
+    num_stages_g : integer   := 3;
+    or_reduce_g  : boolean   := FALSE;
+    rst_val_g    : std_logic := '0'
     );
   port (
     clk_i : in  std_logic;
-    rst_i   : in  std_logic;
-    set_i   : in  std_logic;
+    rst_i : in  std_logic := '0';
+    set_i : in  std_logic := '0';
     d_i   : in  std_logic;
     q_o   : out std_logic
     );
@@ -40,7 +41,7 @@ end ddr_sync_cdc;
 
 architecture RTL of ddr_sync_cdc is
 
-  signal stages_r : std_logic_vector(num_stages_g-1 downto 0) := (others => '0');
+  signal stages_r : std_logic_vector(num_stages_g-1 downto 0) := (others => rst_val_g);
 
   attribute ASYNC_REG             : string;
   attribute ASYNC_REG of stages_r : signal is "TRUE";
@@ -55,18 +56,40 @@ begin
          & "(stages 0..1 are reserved for metastability resolution before the OR-reduce)."
     severity failure;
 
-  SYNC_PR : process(clk_i)
-  begin
-    if rising_edge(clk_i) then
-      stages_r <= stages_r(num_stages_g-2 downto 0) & d_i;
-      if set_i = '1' then
-        stages_r <= (others => '1');
+  -- DDR-P2.25: Specialized reset branches to preserve pure flip-flop primitives.
+  -- Xilinx 7-series / UltraScale slices provide FDRE (reset) or FDSE (set) cells;
+  -- no native cell provides both synchronous set and synchronous reset.
+  -- Evaluating set_i and rst_i in a single process forced Vivado to infer FDRE and
+  -- synthesize a LUT2 on each stage's D pin to implement set_i, breaking
+  -- synchronizer recognition (report_cdc CDC-1 unknown CDC circuitry, depth 0).
+  -- Specializing on rst_val_g allows Vivado to infer pure FDSE (S pin) when
+  -- rst_val_g = '1', and pure FDRE (R pin) when rst_val_g = '0', leaving D
+  -- directly connected to d_i / previous stage (CDC-3 Info, depth N).
+  GEN_SET : if rst_val_g = '1' generate
+    SYNC_PR : process(clk_i)
+    begin
+      if rising_edge(clk_i) then
+        if rst_i = '1' or set_i = '1' then
+          stages_r <= (others => '1');
+        else
+          stages_r <= stages_r(num_stages_g-2 downto 0) & d_i;
+        end if;
       end if;
-      if rst_i = '1' then
-        stages_r <= (others => '0');
+    end process;
+  end generate GEN_SET;
+
+  GEN_RST : if rst_val_g = '0' generate
+    SYNC_PR : process(clk_i)
+    begin
+      if rising_edge(clk_i) then
+        if rst_i = '1' or set_i = '1' then
+          stages_r <= (others => '0');
+        else
+          stages_r <= stages_r(num_stages_g-2 downto 0) & d_i;
+        end if;
       end if;
-    end if;
-  end process;
+    end process;
+  end generate GEN_RST;
 
   GEN_Q : if or_reduce_g = TRUE generate
     -- DDR-T3 (2026-05-27): reduce ONLY the post-synchronization stages.

@@ -61,25 +61,115 @@ olo async FIFOs). That crossing is exactly what RR--P3.8 must constrain — see 
 
 ## 4. CSR map (AXI-Lite, 4 KiB @ `0x4000_0000`)
 
-Word-addressed (offsets in bytes). `W1P` = write-1-to-pulse (self-clearing).
+The single source of truth for the register bank is `project_regbank.yml` at the
+example root. Addresses in the schema and RTL are word indices (`address_mode: words`,
+32-bit registers). Byte offsets are obtained by multiplying the word index by 4
+(e.g., `STATUS` byte `0x04` is word index 1; `IDENT` byte `0x3C` is word index 15).
+`W1P` = write-1-to-pulse (self-clearing strobe, reads 0).
 
-| Off  | Name              | Acc | Bits / meaning |
-|------|-------------------|-----|----------------|
-| 0x00 | `CTRL`            | RW  | [0] start (W1P) · [1] soft_reset (W1P) · [8] continuous |
-| 0x04 | `STATUS`          | R   | [0] running · [1] done · [2] pass · [3] fail · [4] write_idle · [5] read_idle |
-| 0x08 | `SCENARIO`        | RW  | [3:0] scenario id (see §5) |
-| 0x0C | `N_WORDS`         | RW  | user-words to push this run (default 8192) |
-| 0x10 | `ERROR_COUNT`     | R   | mismatches observed this run |
-| 0x14 | `WORDS_WRITTEN`   | R   | S_AXIS beats accepted |
-| 0x18 | `WORDS_READ`      | R   | M_AXIS beats captured |
-| 0x1C | `FIRST_ERR_INDEX` | R   | index of first mismatch (else 0xFFFFFFFF) |
-| 0x20 | `FIRST_ERR_EXP`   | R   | expected word at first mismatch |
-| 0x24 | `FIRST_ERR_GOT`   | R   | observed word at first mismatch |
-| 0x28 | `WR_BASE`         | RW  | DDR offset base, write ring (ping-pong, DDR-P3.11) |
-| 0x2C | `RD_BASE`         | RW  | DDR offset base, read ring |
-| 0x30 | `BASE_LOAD`       | RW  | [0] load WR_BASE (W1P) · [1] load RD_BASE (W1P) |
-| 0x34 | `PTR_RESET`       | RW  | [0] wr ptr reset · [1] rd ptr reset (W1P) — wired when DDR-P3.11 lands |
-| 0x3C | `IDENT`           | R   | `0xDD5_0200` (magic `DDS` + IP version 0.2.0) — host sanity probe |
+| Off  | Word | Name              | Acc | Bits / meaning |
+|------|------|-------------------|-----|----------------|
+| 0x00 | 0    | `CTRL`            | RW  | [0] start (W1P) · [1] soft_reset (W1P) · [8] continuous |
+| 0x04 | 1    | `STATUS`          | R   | [0] running · [1] done · [2] pass · [3] fail · [4] write_idle · [5] read_idle |
+| 0x08 | 2    | `SCENARIO`        | RW  | [3:0] scenario id (see §5) |
+| 0x0C | 3    | `N_WORDS`         | RW  | user-words to push this run (default 8192) |
+| 0x10 | 4    | `ERROR_COUNT`     | R   | mismatches observed this run |
+| 0x14 | 5    | `WORDS_WRITTEN`   | R   | S_AXIS beats accepted |
+| 0x18 | 6    | `WORDS_READ`      | R   | M_AXIS beats captured |
+| 0x1C | 7    | `FIRST_ERR_INDEX` | R   | index of first mismatch (else 0xFFFFFFFF) |
+| 0x20 | 8    | `FIRST_ERR_EXP`   | R   | expected word at first mismatch |
+| 0x24 | 9    | `FIRST_ERR_GOT`   | R   | observed word at first mismatch |
+| 0x28 | 10   | `WR_BASE`         | RW  | DDR offset base, write ring (ping-pong, DDR-P3.11) |
+| 0x2C | 11   | `RD_BASE`         | RW  | DDR offset base, read ring |
+| 0x30 | 12   | `BASE_LOAD`       | RW  | [0] load WR_BASE (W1P) · [1] load RD_BASE (W1P) |
+| 0x34 | 13   | `PTR_RESET`       | RW  | [0] wr ptr reset · [1] rd ptr reset (W1P) — wired when DDR-P3.11 lands |
+| 0x3C | 15   | `IDENT`           | R   | `0x0DD50200` (magic `DDS` + IP version 0.2.0) — host sanity probe |
+
+### 4.1 Relationship to the 4 KiB System Window
+
+The system memory map (`sw/linux/system_memory_map.yml`) assigns the validator CSR
+a 4 KiB subordinate aperture on PS M_AXI_GP0:
+- `base_addr: 0x40000000`
+- `span: 0x1000` (4096 bytes = 1024 32-bit words)
+
+In `project_regbank.yml`:
+- `base_address: 0x40000000`
+- `addr_width: 12` (representing the 12-bit address bus of the 4 KiB aperture, $2^{12} = 4096$ bytes = 1024 words)
+
+The 15 decoded registers occupy word indices 0 through 15 (byte offsets `0x00` through `0x3C`,
+active footprint 64 bytes). Word indices 16 through 1023 (byte offsets `0x040` through `0xFFC`)
+within the 4 KiB window are unmapped in RTL and return 0 on read (`when others => r_data_r <= (others => '0')`).
+
+### 4.2 CLI Commands and Rendered HTML Inspection
+
+To validate the schema and generate the HTML register documentation from the example root:
+
+```bash
+cd example/zybo_z7_20_ddr_validator
+rr regbank validate project_regbank.yml
+rr regbank html project_regbank.yml --output register-map.html
+```
+
+**Inspection of rendered `register-map.html`:**
+- Displays all 15 registers spanning offsets `0x00` to `0x3C` under base `0x40000000` (`version: 0.2.0`).
+- Bit-level layouts accurately render fields for:
+  - `CTRL`: `START` [0], `SOFT_RESET` [1], `CONTINUOUS` [8]
+  - `STATUS`: `RUNNING` [0], `DONE` [1], `PASS` [2], `FAIL` [3], `WRITE_IDLE` [4], `READ_IDLE` [5]
+    *(Note: reset value `0x00000030` reflects the initial combinational state of `write_idle_i` and `read_idle_i` being high when the IP is idle).*
+  - `SCENARIO`: `ID` [3:0] with enum table (0: `ROUNDTRIP`, 1: `BOUNDARY`, 2: `RESET_RECOVERY`, 3: `PINGPONG`)
+  - `N_WORDS`, `ERROR_COUNT`, `WORDS_WRITTEN`, `WORDS_READ`, `FIRST_ERR_INDEX`, `FIRST_ERR_EXP`, `FIRST_ERR_GOT`, `WR_BASE`, `RD_BASE`: [31:0]
+  - `BASE_LOAD`: `WR_BASE_LOAD` [0], `RD_BASE_LOAD` [1]
+  - `PTR_RESET`: `WR_PTR_RESET` [0], `RD_PTR_RESET` [1]
+  - `IDENT`: `VERSION` [15:0] (`0x0200`) and `MAGIC` [31:16] (`0x0DD5`)
+- Due to RouteRTL schema limitation (§4.3), pulse fields show "RW" badges in the table, with write-1-to-pulse semantics noted in their descriptions.
+
+### 4.3 RouteRTL Schema Gap / Limitation: W1P Pulse Fields
+
+RouteRTL regbank schema (`SIDE_EFFECT_KINDS: w1c | rc | latch_clear | none`) currently lacks
+native support for write-1-to-pulse (`w1p` / strobe) fields.
+In RTL (`src/ddr_validator_csr.vhd`), pulse fields:
+- `CTRL.START` [bit 0]
+- `CTRL.SOFT_RESET` [bit 1]
+- `BASE_LOAD.WR_BASE_LOAD` [bit 0]
+- `BASE_LOAD.RD_BASE_LOAD` [bit 1]
+- `PTR_RESET.WR_PTR_RESET` [bit 0]
+- `PTR_RESET.RD_PTR_RESET` [bit 1]
+
+are single-cycle self-clearing strobes: writing 1 asserts the pulse for one clock cycle;
+reads return 0 (`CTRL` reads `start_p_r`/`soft_reset_p_r` as 0; `BASE_LOAD` and `PTR_RESET`
+fall through to `when others => r_data_r <= (others => '0')`).
+
+Because `w1p` cannot be encoded in the RouteRTL schema, these fields are declared with
+`access: rw` without fake side-effect declarations (`side_effect: none` or `latch_clear`
+would be misleading). Consequently, generated HTML and C headers render them as RW.
+**RouteRTL gap report:** RouteRTL regbank schema and generator should add first-class `w1p`
+support (or `access: w1p` / `side_effect: w1p`) to properly generate strobe logic and
+accurate documentation.
+
+### 4.4 Cross-Board Example Register Map Relationships
+
+Relationship between this schema and other board examples in `rr-ddr-stream`:
+- `zybo_classic` (`example/zybo_classic_ddr_validator`):
+  Shares the identical 15-register CSR map (same offsets, decode logic, base `0x40000000`, span `0x1000`).
+- `kv260` (`example/kv260_ddr_validator`):
+  Shares the same 15-register CSR decode/layout, but mapped at base `0xA0000000`,
+  span `0x10000` (PS S_AXI_HP0_FPD DDR4).
+- `de25` (`example/de25_agilex5_ddr_validator`):
+  Shares the same 15-register CSR decode/layout, mapped at Agilex 5 HPS lwh2f aperture
+  base `0x20000000`, span `0x1000`, with independent AW/W handshakes (DDR-T2.5).
+- `pfsoc` (`example/pfsoc_disco_ddr_validator`):
+  Extends this CSR map with `C_WR_COMMIT` at word index 14 (byte `0x38`) for durable write
+  pointer tracking (`wr_commit_addr_i`).
+- `axe5` (`example/axe5_eagle_lpddr4_validator`):
+  Userspace app uses an alternative/different register map (`REG_IDENT 0x00`,
+  `REG_CONTROL 0x04`, `REG_SCENARIO 0x08`, `REG_N_WORDS 0x0C`, `REG_STATUS 0x10`, `CSR_BASE 0x20000000`).
+
+**Authority Notice:** `project_regbank.yml` is authoritative ONLY for `zybo_z7_20_ddr_validator`
+(and verified identical clones like `zybo_classic`). It must not be presented as authoritative
+for unverified board variants without target verification.
+**Core Notice:** The reusable streaming core `ddr_stream_axi` itself does NOT carry a register
+bank; it exposes raw telemetry via the `ddr_csr_o : out fifo_csr_t` port (see [`docs/CSR_CONTRACT.md`](../../docs/CSR_CONTRACT.md)).
+
 
 ## 5. Scenarios (mirror the cocotb suite)
 

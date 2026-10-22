@@ -40,8 +40,8 @@
 #     -datapath_only merely BOUNDS (never cuts) any extra same-domain paths
 #     it sweeps in, a false path would CUT them. So every set_false_path below
 #     names the true crossing SOURCE registers where they are IP-internal
-#     (RegIn, *_sys, Rst?Latch); the one `-from [get_registers *]` left
-#     (section D) is justified in place.
+#     (RegIn, *_sys, Rst?Latch). Section D's launch set is the synchronous
+#     fan-in of stages_r[0] (DDR-P2.23), not a chip-wide get_registers *.
 #
 # Per-crossing map (XDC section -> SDC section):
 #   XDC A "*i_ddr_fifo_intf*Reg0_reg*"            -> A (RegIn -> Reg0)
@@ -91,6 +91,63 @@
 #                           rtl/ddr_stream_axi.vhd (AXI TOP only)
 
 # ---------------------------------------------------------------------------
+# Clock identity (DDR-P2.23). Quartus Standard 23.1 — a downstream toolchain —
+# accepts only `get_clocks [-nocase] [-nowarn] [<filter>]`. Both
+# `get_clocks -of` and `get_clocks -of_objects` fail there with
+# "More than 1 positional argument specified" (verified on 23.1std.0 build 991).
+# `-of_objects` is a Prime Pro spelling and must not appear in this file.
+#
+# The Standard-legal netlist query that works inside read_sdc (before
+# update_timing_netlist, where get_timing_paths is ignored) is
+# `get_fanins -clock <registers>`. It returns the clock-source node of those
+# registers. On a consumer that ties clk_sys and clk_ddr to one port
+# (DE25 CLOCK2_50), both sides fan in to that same node. A set_false_path
+# between them is then an intra-clock cut and Quartus Design Assistant reports
+# CDC-50101. Skip the cut when the union of launch and capture clock-source
+# nodes has size 1. Keep set_net_delay / set_max_skew: those bound the route,
+# they do not create a false-path synchronizer.
+# Unknown clocks (empty fanin, or this file sourced outside TimeQuest) fall
+# open to "distinct" so a real two-clock consumer still gets the cut.
+# ---------------------------------------------------------------------------
+if {[info procs _rr_ds_clock_nodes] eq ""} {
+    proc _rr_ds_clock_nodes {col} {
+        if {[info commands get_fanins] eq "" || [info commands get_node_info] eq ""} {
+            return [list]
+        }
+        if {[catch {set fins [get_fanins -clock $col]}]} {
+            return [list]
+        }
+        set names [list]
+        foreach_in_collection n $fins {
+            if {[catch {lappend names [get_node_info -name $n]}]} {
+                lappend names $n
+            }
+        }
+        return [lsort -unique $names]
+    }
+}
+if {[info procs _rr_ds_are_clocks_distinct] eq ""} {
+    proc _rr_ds_are_clocks_distinct {from_col to_col} {
+        if {[info commands get_collection_size] eq ""} {
+            return 1
+        }
+        if {[get_collection_size $from_col] == 0 || [get_collection_size $to_col] == 0} {
+            return 1
+        }
+        set from_nodes [_rr_ds_clock_nodes $from_col]
+        set to_nodes [_rr_ds_clock_nodes $to_col]
+        if {[llength $from_nodes] == 0 || [llength $to_nodes] == 0} {
+            return 1
+        }
+        set all_nodes [lsort -unique [concat $from_nodes $to_nodes]]
+        if {[llength $all_nodes] == 1} {
+            return 0
+        }
+        return 1
+    }
+}
+
+# ---------------------------------------------------------------------------
 # A) olo_base_cc_bits data crossings under i_ddr_fifo_intf: gray read/write
 #    pointers (i_cc_wr_rd / i_cc_rd_wr) and the reset-ack bits
 #    (i_rst_cc/i_acka2b / i_ackb2a). In every olo_base_cc_bits the ONLY
@@ -101,7 +158,9 @@
 # ---------------------------------------------------------------------------
 set _rr_ds_cc_from [get_registers {*i_ddr_fifo_intf*RegIn[*]}]
 set _rr_ds_cc_to   [get_registers {*i_ddr_fifo_intf*Reg0[*]}]
-set_false_path -from $_rr_ds_cc_from -to $_rr_ds_cc_to
+if {[_rr_ds_are_clocks_distinct $_rr_ds_cc_from $_rr_ds_cc_to]} {
+    set_false_path -from $_rr_ds_cc_from -to $_rr_ds_cc_to
+}
 set_net_delay  -from $_rr_ds_cc_from -to $_rr_ds_cc_to -max \
     -get_value_from_clock_period dst_clock_period -value_multiplier 0.8
 set_max_skew   -from $_rr_ds_cc_from -to $_rr_ds_cc_to \
@@ -145,7 +204,9 @@ set_max_skew   -from $_rr_ds_cc_from -to $_rr_ds_cc_to \
 # ---------------------------------------------------------------------------
 set _rr_ds_rstA_from [get_registers {*i_rst_cc*RstALatch}]
 set _rr_ds_rstA_to   [get_registers {*i_rst_cc*RstRqstA2B[*]}]
-set_false_path -from $_rr_ds_rstA_from -to $_rr_ds_rstA_to
+if {[_rr_ds_are_clocks_distinct $_rr_ds_rstA_from $_rr_ds_rstA_to]} {
+    set_false_path -from $_rr_ds_rstA_from -to $_rr_ds_rstA_to
+}
 set_net_delay  -from $_rr_ds_rstA_from -to $_rr_ds_rstA_to -max \
     -get_value_from_clock_period dst_clock_period -value_multiplier 0.8
 set_max_skew   -from $_rr_ds_rstA_from -to $_rr_ds_rstA_to \
@@ -153,7 +214,9 @@ set_max_skew   -from $_rr_ds_rstA_from -to $_rr_ds_rstA_to \
 
 set _rr_ds_rstB_from [get_registers {*i_rst_cc*RstBLatch}]
 set _rr_ds_rstB_to   [get_registers {*i_rst_cc*RstRqstB2A[*]}]
-set_false_path -from $_rr_ds_rstB_from -to $_rr_ds_rstB_to
+if {[_rr_ds_are_clocks_distinct $_rr_ds_rstB_from $_rr_ds_rstB_to]} {
+    set_false_path -from $_rr_ds_rstB_from -to $_rr_ds_rstB_to
+}
 set_net_delay  -from $_rr_ds_rstB_from -to $_rr_ds_rstB_to -max \
     -get_value_from_clock_period dst_clock_period -value_multiplier 0.8
 set_max_skew   -from $_rr_ds_rstB_from -to $_rr_ds_rstB_to \
@@ -177,27 +240,46 @@ set_max_skew   -from $_rr_ds_rstB_from -to $_rr_ds_rstB_to \
 #    `*rd_base_addr_{sys,meta}[*] could not be matched` warnings, violating
 #    DDR-T1.3 DONE-WHEN (b) "zero TMC-20026 empty collections".
 #
-#    Fix: mirror section E exactly — `-nowarn` on the get_registers (so an
-#    absent plane's sub-pattern does not emit 332174) plus a get_collection_size
-#    guard whose `else` makes a fully-absent base-address selector VISIBLE via
-#    post_message (DDR-T1.3 owner clause 3: a 0-match is never SILENTLY
-#    swallowed). The present plane is still constrained; the -nowarn only
-#    silences the raw per-sub-pattern warning, not the controlled report.
+#    DDR-P3.37 silenced the combined brace-list with -nowarn. That still leaves
+#    one get_registers filter whose read-plane sub-pattern matches nothing on a
+#    write-only consumer (DS-P1.72 / DS-T1.20: `*rd_base_addr_sys[*]` and
+#    `*rd_base_addr_meta[*]` are empty collections). DDR-P2.23 splits the read
+#    and write planes into their own -nowarn queries. A present plane binds on
+#    its own; an absent plane does not sit inside the other plane's filter, so
+#    Quartus does not report an ignored read-base filter, and set_max_skew does
+#    not group the two address buses together. Each absent plane still emits
+#    one controlled post_message (owner clause 3). The message is braced so
+#    Tcl does not command-substitute the `[*]` glob.
 # ---------------------------------------------------------------------------
-set _rr_ds_base_from [get_registers -nowarn {*rd_base_addr_sys[*] *wr_base_addr_sys[*]}]
-set _rr_ds_base_to   [get_registers -nowarn {*rd_base_addr_meta[*] *wr_base_addr_meta[*]}]
-if {[get_collection_size $_rr_ds_base_to] > 0} {
-    set_false_path -from $_rr_ds_base_from -to $_rr_ds_base_to
-    set_net_delay  -from $_rr_ds_base_from -to $_rr_ds_base_to -max \
+set _rr_ds_wr_base_from [get_registers -nowarn {*wr_base_addr_sys[*]}]
+set _rr_ds_wr_base_to   [get_registers -nowarn {*wr_base_addr_meta[*]}]
+if {[get_collection_size $_rr_ds_wr_base_to] > 0} {
+    if {[_rr_ds_are_clocks_distinct $_rr_ds_wr_base_from $_rr_ds_wr_base_to]} {
+        set_false_path -from $_rr_ds_wr_base_from -to $_rr_ds_wr_base_to
+    }
+    set_net_delay  -from $_rr_ds_wr_base_from -to $_rr_ds_wr_base_to -max \
         -get_value_from_clock_period dst_clock_period -value_multiplier 0.8
-    set_max_skew   -from $_rr_ds_base_from -to $_rr_ds_base_to \
+    set_max_skew   -from $_rr_ds_wr_base_from -to $_rr_ds_wr_base_to \
         -get_skew_value_from_clock_period min_clock_period -skew_value_multiplier 0.8
 } else {
-    # Both base-address planes absent: neither rd nor wr base_addr capture flop
-    # exists. That is unexpected on any streaming build (the base address is the
-    # DDR ring origin), so surface it rather than swallow it.
     if {[info commands post_message] ne ""} {
-        post_message -type warning "ddr_stream_cdc_scoped.sdc section C: base-address MCP selector {*rd_base_addr_meta[*] *wr_base_addr_meta[*]} matched 0 registers on this build. Expected NEVER on a streaming config (the base address is the ring origin); investigate a constant-folded or renamed base-address register (DDR-T1.3 audit §4a, DDR-P3.37 §CP1/DONE-WHEN-b)."
+        post_message -type warning {ddr_stream_cdc_scoped.sdc section C: wr_base_addr MCP selector {*wr_base_addr_meta[*]} matched 0 registers on this build. Expected when the write plane is absent; on a write-plane config investigate a constant-folded or renamed base-address register (DDR-T1.3 audit §4a, DDR-P3.37, DDR-P2.23).}
+    }
+}
+
+set _rr_ds_rd_base_from [get_registers -nowarn {*rd_base_addr_sys[*]}]
+set _rr_ds_rd_base_to   [get_registers -nowarn {*rd_base_addr_meta[*]}]
+if {[get_collection_size $_rr_ds_rd_base_to] > 0} {
+    if {[_rr_ds_are_clocks_distinct $_rr_ds_rd_base_from $_rr_ds_rd_base_to]} {
+        set_false_path -from $_rr_ds_rd_base_from -to $_rr_ds_rd_base_to
+    }
+    set_net_delay  -from $_rr_ds_rd_base_from -to $_rr_ds_rd_base_to -max \
+        -get_value_from_clock_period dst_clock_period -value_multiplier 0.8
+    set_max_skew   -from $_rr_ds_rd_base_from -to $_rr_ds_rd_base_to \
+        -get_skew_value_from_clock_period min_clock_period -skew_value_multiplier 0.8
+} else {
+    if {[info commands post_message] ne ""} {
+        post_message -type warning {ddr_stream_cdc_scoped.sdc section C: rd_base_addr MCP selector {*rd_base_addr_meta[*]} matched 0 registers on this build. Expected when the read plane is absent; on a read-plane config investigate a constant-folded or renamed base-address register (DDR-T1.3 audit §4a, DDR-P3.37, DDR-P2.23).}
     }
 }
 
@@ -206,19 +288,26 @@ if {[get_collection_size $_rr_ds_base_to] > 0} {
 #    level syncs + the rd/wr software-pointer toggle syncs). Only stages_r[0]
 #    captures the asynchronous d_i; stages_r[1..N-1] are same-domain settling
 #    stages and stay normally timed.
-#    `-from [get_registers *]` is retained from the XDC here because two d_i
-#    fan-ins are not IP-internal registers (i_sync_cdc_pipe_busy's set_i is
-#    rst_ddr_i — a consumer-driven port — and several d_i sources sit behind
-#    module-local logic). Side effect, accepted and documented: the SYNCHRONOUS
-#    set_i/rst_i override path into bit 0 of i_sync_cdc_pipe_busy /
-#    i_sync_cdc_empty is also cut. That is safe: set_i is a reset-stretch
-#    control, bits 1..N-1 still time it normally, and q_o never exposes bit 0
-#    (or_reduce_g reduces stages 2..N-1 only).
+#    The launch set is the synchronous fan-in of stages_r[0], not
+#    `[get_registers *]`. A chip-wide from-set includes unrelated clocks
+#    (JTAG, HPS) and would keep an intra-clock false path on a one-fabric-clock
+#    DE25 even after the distinct-clock guard. get_fanins -synch is legal inside
+#    read_sdc on Quartus Standard and Pro and returns the register that launches
+#    each capture flop. The same-domain set_i/rst_i override stays normally timed.
 # ---------------------------------------------------------------------------
 set _rr_ds_sync_to [get_registers {*i_sync_cdc_*stages_r[0]}]
-set_false_path -from [get_registers *] -to $_rr_ds_sync_to
-set_net_delay  -from [get_registers *] -to $_rr_ds_sync_to -max \
-    -get_value_from_clock_period dst_clock_period -value_multiplier 0.8
+if {[info commands get_fanins] ne ""} {
+    set _rr_ds_sync_from [get_fanins -synch $_rr_ds_sync_to]
+} else {
+    set _rr_ds_sync_from [get_registers *]
+}
+if {[get_collection_size $_rr_ds_sync_from] > 0 && [get_collection_size $_rr_ds_sync_to] > 0} {
+    if {[_rr_ds_are_clocks_distinct $_rr_ds_sync_from $_rr_ds_sync_to]} {
+        set_false_path -from $_rr_ds_sync_from -to $_rr_ds_sync_to
+    }
+    set_net_delay  -from $_rr_ds_sync_from -to $_rr_ds_sync_to -max \
+        -get_value_from_clock_period dst_clock_period -value_multiplier 0.8
+}
 
 # ---------------------------------------------------------------------------
 # E) Software-managed pointer MCP (AXI TOP only): rd/wr_ptr_addr_sys ->
@@ -226,30 +315,39 @@ set_net_delay  -from [get_registers *] -to $_rr_ds_sync_to -max \
 #    the data is stable >= num_stages destination cycles before capture.
 #    May match 0 registers (AVMM TOP; validators folding the CSR pointers to
 #    constants). Per DDR-T1.3 owner clause (3) a 0-match is NEVER benign and must
-#    not be silently swallowed: the size guard below now carries an `else` branch
-#    that emits `post_message -type warning` naming the empty selector, so a
-#    0-match is VISIBLE in the Quartus fit log instead of being hidden by -nowarn.
+#    not be silently swallowed: each plane's size guard carries an `else` that
+#    emits `post_message -type warning` naming the empty selector.
+#    DDR-P2.23 splits the read and write pointer filters so an absent plane is
+#    not an empty sub-pattern inside the other plane's brace-list.
 # ---------------------------------------------------------------------------
-set _rr_ds_ptr_from [get_registers -nowarn {*rd_ptr_addr_sys[*] *wr_ptr_addr_sys[*]}]
-set _rr_ds_ptr_to   [get_registers -nowarn {*rd_ptr_addr_ddr[*] *wr_ptr_addr_ddr[*]}]
-if {[get_collection_size $_rr_ds_ptr_to] > 0} {
-    set_false_path -from $_rr_ds_ptr_from -to $_rr_ds_ptr_to
-    set_net_delay  -from $_rr_ds_ptr_from -to $_rr_ds_ptr_to -max \
+set _rr_ds_wr_ptr_from [get_registers -nowarn {*wr_ptr_addr_sys[*]}]
+set _rr_ds_wr_ptr_to   [get_registers -nowarn {*wr_ptr_addr_ddr[*]}]
+if {[get_collection_size $_rr_ds_wr_ptr_to] > 0} {
+    if {[_rr_ds_are_clocks_distinct $_rr_ds_wr_ptr_from $_rr_ds_wr_ptr_to]} {
+        set_false_path -from $_rr_ds_wr_ptr_from -to $_rr_ds_wr_ptr_to
+    }
+    set_net_delay  -from $_rr_ds_wr_ptr_from -to $_rr_ds_wr_ptr_to -max \
         -get_value_from_clock_period dst_clock_period -value_multiplier 0.8
-    set_max_skew   -from $_rr_ds_ptr_from -to $_rr_ds_ptr_to \
+    set_max_skew   -from $_rr_ds_wr_ptr_from -to $_rr_ds_wr_ptr_to \
         -get_skew_value_from_clock_period min_clock_period -skew_value_multiplier 0.8
 } else {
-    # DDR-T1.3 owner clause (3): a 0-match is NEVER benign and must not be
-    # silently swallowed. On a write-plane-on / read-plane-on build BOTH SW
-    # pointer pairs are legitimately absent (the FIFO gray pointer in section A
-    # is the real crossing, already constrained), so this is expected there. On a
-    # SW-pointer config it means the pointer MCP crossing shipped UNCONSTRAINED —
-    # investigate. Either way it is now VISIBLE in the fit log, not hidden by the
-    # -nowarn + size guard. `post_message` is the Quartus timing-analysis emitter
-    # (available in quartus_sta when this SDC is sourced); the `info commands`
-    # guard makes the else a safe no-op anywhere post_message is absent, so this
-    # never errors a non-Quartus reader.
     if {[info commands post_message] ne ""} {
-        post_message -type warning "ddr_stream_cdc_scoped.sdc section E: SW-pointer MCP selector {*rd_ptr_addr_ddr[*] *wr_ptr_addr_ddr[*]} matched 0 registers on this build. Expected on a HW read/write-plane config (section A's FIFO gray pointer is the real crossing); a DEFECT on a SW-pointer config (the pointer MCP is then UNCONSTRAINED). Confirm against enable_read_plane_g/enable_write_plane_g (DDR-T1.3 audit §4b/§5.2)."
+        post_message -type warning {ddr_stream_cdc_scoped.sdc section E: wr_ptr_addr MCP selector {*wr_ptr_addr_ddr[*]} matched 0 registers on this build. Expected on a HW write-plane config (section A's FIFO gray pointer is the real crossing); a DEFECT on a SW-pointer config (the pointer MCP is then UNCONSTRAINED). Confirm against enable_write_plane_g (DDR-T1.3 audit §4b, DDR-P2.23).}
+    }
+}
+
+set _rr_ds_rd_ptr_from [get_registers -nowarn {*rd_ptr_addr_sys[*]}]
+set _rr_ds_rd_ptr_to   [get_registers -nowarn {*rd_ptr_addr_ddr[*]}]
+if {[get_collection_size $_rr_ds_rd_ptr_to] > 0} {
+    if {[_rr_ds_are_clocks_distinct $_rr_ds_rd_ptr_from $_rr_ds_rd_ptr_to]} {
+        set_false_path -from $_rr_ds_rd_ptr_from -to $_rr_ds_rd_ptr_to
+    }
+    set_net_delay  -from $_rr_ds_rd_ptr_from -to $_rr_ds_rd_ptr_to -max \
+        -get_value_from_clock_period dst_clock_period -value_multiplier 0.8
+    set_max_skew   -from $_rr_ds_rd_ptr_from -to $_rr_ds_rd_ptr_to \
+        -get_skew_value_from_clock_period min_clock_period -skew_value_multiplier 0.8
+} else {
+    if {[info commands post_message] ne ""} {
+        post_message -type warning {ddr_stream_cdc_scoped.sdc section E: rd_ptr_addr MCP selector {*rd_ptr_addr_ddr[*]} matched 0 registers on this build. Expected on a HW read-plane config (section A's FIFO gray pointer is the real crossing); a DEFECT on a SW-pointer config (the pointer MCP is then UNCONSTRAINED). Confirm against enable_read_plane_g (DDR-T1.3 audit §4b, DDR-P2.23).}
     }
 }

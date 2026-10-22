@@ -473,7 +473,8 @@ begin
 
   i_sync_cdc_empty : entity rr.ddr_sync_cdc
     generic map(
-      num_stages_g => C_CDC_NUM_STAGES
+      num_stages_g => C_CDC_NUM_STAGES,
+      rst_val_g    => '1'
       )
     port map (
       clk_i => clk_sys_i,
@@ -615,7 +616,9 @@ begin
 
   ---------------------------------------------------------------------------
   -- DDR-P3.9: runtime base-address registers + idle outputs.
-  -- See ddr_stream_axi.vhd for the design rationale.
+  -- See ddr_stream_axi.vhd for the design rationale, and for the
+  -- quasi-static protocol (DDR-REQ-211, DDR-P2.29) that the RR-CDC-005
+  -- waivers on the two *_base_addr_meta captures below name.
   ---------------------------------------------------------------------------
   write_idle_o <= not upBusBusyCdc;
   read_idle_o  <= not downBusBusyCdc;
@@ -656,9 +659,9 @@ begin
         rd_base_addr_meta <= C_DDR_BASE_RST;
         rd_base_addr_ddr  <= C_DDR_BASE_RST;
       else
-        wr_base_addr_meta <= wr_base_addr_sys;
+        wr_base_addr_meta <= wr_base_addr_sys;  -- rr-lint-disable-line RR-CDC-005 quasi-static: wr_base_addr_sys loads only while write_idle_o=1 and the plane holds no data until the capture settles (DDR-REQ-211)
         wr_base_addr_ddr  <= wr_base_addr_meta;
-        rd_base_addr_meta <= rd_base_addr_sys;
+        rd_base_addr_meta <= rd_base_addr_sys;  -- rr-lint-disable-line RR-CDC-005 quasi-static: rd_base_addr_sys loads only while read_idle_o=1 and the plane holds no data until the capture settles (DDR-REQ-211)
         rd_base_addr_ddr  <= rd_base_addr_meta;
       end if;
     end if;

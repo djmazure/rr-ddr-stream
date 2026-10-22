@@ -46,10 +46,6 @@ paths:
     - src
     - libs
 
-  libraries:
-    rr:
-      - libs/local/ddr_stream_axi/rtl/ddr_stream_pkg.vhd
-      - libs/local/ddr_stream_axi/rtl/support/functions_pkg.vhd
 # Packages (rr pkg). `local/ddr_stream_axi` is the IP under test (vendored to
 # libs/local/ddr_stream_axi, library rr). The open-logic/olo_* FIFO primitives
 # are its transitive deps, pinned explicitly too — mirrors the IP's own ip.yml

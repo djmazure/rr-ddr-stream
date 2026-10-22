@@ -60,6 +60,8 @@ def test_synth_project_pins_quartus_std_23_1_and_wrapper_top():
     assert cfg["hardware"]["edition"] == "std"
     assert str(cfg["hardware"]["part"]).startswith("10AX")
     assert cfg["toolchain"]["tool"] == "quartus-std-23.1"
-    syn = cfg["sources"]["syn"]
-    assert "example/quartus_std_high_base/src/ddr_stream_avmm_high_base.vhd" in syn
-    assert "rtl/ddr_stream_avmm.vhd" in syn
+    # DDR-P3.46: the resolver builds the compile set from paths.sources, so
+    # the wrapper and the IP top must be reachable from those roots.
+    roots = cfg["paths"]["sources"]
+    assert "example/quartus_std_high_base/src" in roots
+    assert "rtl" in roots

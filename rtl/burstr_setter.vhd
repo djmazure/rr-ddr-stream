@@ -89,6 +89,7 @@ architecture RTL of burstr_setter is
   signal axi4kBoundaryBurst   : unsigned(C_MAX_LEN_WIDTH-1 downto 0)                 := (others => '0');
   signal PtrEmptyDistance     : unsigned(buffer_width_g-1 downto 0)                  := (others => '0');
   signal PtrEmptyBurst        : unsigned(C_MAX_LEN_WIDTH-1 downto 0)                 := (others => '0');
+  signal PtrEmptyBurst_r      : unsigned(C_MAX_LEN_WIDTH-1 downto 0)                 := (others => '0');
 
   signal DdrEmpty        : std_logic;
   -- Data Count is in fact "beat" counting
@@ -150,6 +151,17 @@ begin
   PROC_SET_BURST : process(clk_ddr_i)
   begin
     if rising_edge(clk_ddr_i) then
+      --------------------------------------------------------------------------
+      -- DDR-T2.22: register the data available in the ring before the s2
+      -- clamp, as burstw_setter registers its free space. The unregistered
+      -- chain (ptr_mgr wr-rd diff, the burst shift, the s1 compare) is the
+      -- mechanism of DDR-P3.12's DE25 setup miss. The extra cycle does not
+      -- change the burst: inside the latch window the read pointer cannot move
+      -- (axi4r loads it only in IDLE on a new command, and the next command is
+      -- this setter's), and the write pointer only advances, so the registered
+      -- amount is the same or smaller than the live one.
+      --------------------------------------------------------------------------
+      PtrEmptyBurst_r <= PtrEmptyBurst;
       --
       latch_data_cnt_s2_r <= latch_data_cnt_s1_r;
       latch_data_cnt_s3_r <= latch_data_cnt_s2_r;
@@ -160,8 +172,8 @@ begin
       -----------------------------------------------------------------------
       -- Check if the amount of data to read is bigger than the maximum burst
       -----------------------------------------------------------------------
-      if fifo_data_room_s1_r > PtrEmptyBurst then
-        fifo_data_room_s2_r <= assign_with_padding(fifo_data_room_s2_r, PtrEmptyBurst);
+      if fifo_data_room_s1_r > PtrEmptyBurst_r then
+        fifo_data_room_s2_r <= assign_with_padding(fifo_data_room_s2_r, PtrEmptyBurst_r);
       end if;
       -----------------------------------------------------------------------
       -- If after all, data count is over MAX BURST, saturate

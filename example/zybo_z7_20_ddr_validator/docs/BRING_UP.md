@@ -45,7 +45,28 @@ the standalone v0 run doesn't show, suspect the clamp first.
 cd example/zybo_z7_20_ddr_validator
 rr status                       # workspace + toolchain sanity
 rr deps tree top_zybo_z7_20_ddr_validator   # confirm the resolver orders src/ + ../../rtl + ../../libs
+
+# Register bank schema validation and HTML map generation
+rr regbank validate project_regbank.yml
+rr regbank html project_regbank.yml --output register-map.html
 ```
+
+> **Register schema note (DDR-P2.16):**
+> `project_regbank.yml` is the single source of truth for the AXI-Lite CSR decode.
+> It defines 15 registers within the 4 KiB system window (`0x4000_0000`, span `0x1000`,
+> matching `sw/linux/system_memory_map.yml`). Word indices 0..15 correspond to byte
+> offsets `0x00`..`0x3C` (active footprint 64 bytes); unused addresses (words 16..1023)
+> read as zero. Rendered `register-map.html` documents all fields, enums, and bit
+> positions. Note: pulse fields (`CTRL.start`, `CTRL.soft_reset`, `BASE_LOAD.*`,
+> `PTR_RESET.*`) appear with `RW` badges in HTML because RouteRTL currently lacks
+> native `W1P` schema support (see `DESIGN.md` §4.3).
+>
+> **Cross-board variants:** `zybo_classic` shares this identical 15-register map;
+> `kv260` shares the layout at base `0xA000_0000` (span `0x10000`); `de25` shares the
+> layout at base `0x2000_0000` (span `0x1000`); `pfsoc` extends it with `C_WR_COMMIT`
+> at `0x38`; `axe5` userspace uses an alternative map (`REG_IDENT` at `0x00`).
+> This schema is authoritative ONLY for `zybo_z7_20_ddr_validator` (and verified identical clones).
+
 
 ### Stage 1 — build the bitstream
 

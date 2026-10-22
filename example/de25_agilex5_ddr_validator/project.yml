@@ -36,16 +36,20 @@ paths:
   sources:
     - src
     - libs
-    - debug/rea        # REA bring-up probe RTL (assigned to lib rr below) — RTL-P3.739
-  libraries:
-    rr:
-      - libs/local/ddr_stream_axi/rtl/ddr_stream_pkg.vhd
-      - libs/local/ddr_stream_axi/rtl/support/functions_pkg.vhd
+    - debug/rea        # REA bring-up probe RTL — RTL-P3.739
   # REA (RouteRTL Embedded Analyzer) bring-up probe RTL lives in debug/rea (added
   # to paths.sources above). It is NOT library-overridden — the files cross-
   # reference each other via `library work` and the top instantiates them as
   # `work.rr_rea_intel`, so autodiscovery keeps all 8 + the top consistently in
   # `work` (vendored point-in-time from routertl ip/routertl/rea/rtl; RTL-P3.739).
+
+# DDR-T2.20 (2026-10-09): scoped CDC SDC for Quartus (Altera) timing closure.
+# Until rr pkg vendors build.sources.sdc into ip.lock, this validator hand-vendors
+# constraints/ddr_stream_cdc_scoped.sdc so the fitted design applies false_path /
+# net_delay / max_skew on all ddr_stream CDC crossings (no fail-open).
+sources:
+  sdc:
+    - constraints/ddr_stream_cdc_scoped.sdc
 
 packages:
   # The open-logic packages ship no routertl ip.yml, so each is locked into a

@@ -2037,6 +2037,7 @@ async def ping_pong_basic_test(dut):
 
 
 @cocotb.test()
+@requires("DDR-REQ-211")
 async def ping_pong_concurrent_test(dut):
     """DDR-P4.4 — attempt a base-load+ptr-reset while buffer A is actively
     draining and both public idle flags are low.  The documented response is

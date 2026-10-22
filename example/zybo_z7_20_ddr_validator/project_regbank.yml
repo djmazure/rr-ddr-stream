@@ -1,0 +1,268 @@
+# SPDX-License-Identifier: LicenseRef-RouteRTL-1.0
+# SPDX-FileCopyrightText: 2026 Daniel J. Mazure
+#
+# Register bank schema for the Zybo Z7-20 ddr_stream_axi hardware validator.
+# SINGLE SOURCE OF TRUTH for AXI-Lite CSR decode (0x40000000 / span 0x1000).
+#
+# ── Relationship to the 4 KiB System Window ───────────────────────────────────
+# Defined in sw/linux/system_memory_map.yml:
+#   device:    ddr_validator_csr
+#   base_addr: 0x40000000
+#   span:      0x1000 (4 KiB = 4096 bytes = 1024 32-bit words)
+#
+# Addresses below are word indices (address_mode: words, 32-bit registers).
+# To obtain byte offsets, multiply the word index by 4 (e.g. STATUS word 1 = byte 0x04,
+# IDENT word 15 = byte 0x3C).
+# The schema defines 15 active registers in word indices 0..15 (byte offsets 0x00..0x3C,
+# active footprint 64 bytes).
+# Word indices 16..1023 (byte offsets 0x040..0xFFC) within the 4 KiB aperture are unmapped
+# in RTL and return 0 on read (src/ddr_validator_csr.vhd: when others => r_data_r <= 0).
+# addr_width: 12 corresponds to the 12-bit address bus of the 4 KiB subordinate window (2^12 = 4096 B).
+# Hand-decoded in src/ddr_validator_csr.vhd and mapped in sw/linux/ddr_validator.c.
+#
+# ── Copy/Paste Commands (Schema Validation & HTML Rendering) ──────────────────
+# From the example root (example/zybo_z7_20_ddr_validator):
+#   rr regbank validate project_regbank.yml
+#   rr regbank html project_regbank.yml --output register-map.html
+#
+# ── Rendered HTML Inspection Note ─────────────────────────────────────────────
+# Rendered HTML displays all 15 registers spanning offsets 0x00..0x3C at base 0x40000000.
+# Bit layouts are rendered accurately for CTRL (bits 0, 1, 8), STATUS (bits 0..5),
+# SCENARIO (bits 3..0 enum table: 0=ROUNDTRIP, 1=BOUNDARY, 2=RESET_RECOVERY, 3=PINGPONG),
+# BASE_LOAD (bits 0, 1), PTR_RESET (bits 0, 1), and IDENT (version 0x0200, magic 0x0DD5).
+# Note: Pulse fields show "RW" badges in rendered HTML due to the RouteRTL schema gap below.
+#
+# ── RouteRTL Schema Gap / Limitation: W1P Pulse Fields ────────────────────────
+# RouteRTL regbank schema (SIDE_EFFECT_KINDS: w1c | rc | latch_clear | none) lacks
+# native support for write-1-to-pulse (w1p / strobe) fields.
+# In RTL (src/ddr_validator_csr.vhd), pulse fields:
+#   - CTRL.START [bit 0]
+#   - CTRL.SOFT_RESET [bit 1]
+#   - BASE_LOAD.WR_BASE_LOAD [bit 0]
+#   - BASE_LOAD.RD_BASE_LOAD [bit 1]
+#   - PTR_RESET.WR_PTR_RESET [bit 0]
+#   - PTR_RESET.RD_PTR_RESET [bit 1]
+# are single-cycle self-clearing strobes: writing 1 asserts the pulse for one clock cycle;
+# reads return 0 (CTRL reads start_p_r/soft_reset_p_r as 0; BASE_LOAD and PTR_RESET fall
+# through to when others => 0).
+# Because w1p is not encodable in the RouteRTL schema, these fields are declared with
+# access: rw without fake side-effect declarations (side_effect: none or latch_clear would
+# be misleading). Consequently, generated HTML and C headers render them as RW.
+# Gap report: RouteRTL regbank schema and generator should add first-class w1p support
+# (or access: w1p / side_effect: w1p) to properly encode and document pulse strobe fields.
+#
+# ── Cross-Board Example Register Map Relationships ────────────────────────────
+# Relationship between this schema and other board examples in rr-ddr-stream:
+#   - zybo_classic (example/zybo_classic_ddr_validator):
+#       Shares the identical 15-register CSR map (same offsets, decode, base 0x40000000, span 0x1000).
+#   - kv260 (example/kv260_ddr_validator):
+#       Shares the same 15-register CSR decode/layout, but mapped at base 0xA0000000,
+#       span 0x10000 (PS S_AXI_HP0_FPD DDR4).
+#   - de25 (example/de25_agilex5_ddr_validator):
+#       Shares the same 15-register CSR decode/layout, mapped at Agilex 5 HPS lwh2f aperture
+#       base 0x20000000, span 0x1000, with independent AW/W handshakes (DDR-T2.5).
+#   - pfsoc (example/pfsoc_disco_ddr_validator):
+#       Extends this CSR map with C_WR_COMMIT at word index 14 (byte 0x38) for durable write
+#       pointer tracking (wr_commit_addr_i).
+#   - axe5 (example/axe5_eagle_lpddr4_validator):
+#       Userspace app uses an alternative/different register map (REG_IDENT 0x00,
+#       REG_CONTROL 0x04, REG_SCENARIO 0x08, REG_N_WORDS 0x0C, REG_STATUS 0x10, CSR_BASE 0x20000000).
+#
+# Authority Notice: This schema is authoritative ONLY for the Zybo Z7-20 validator (and verified
+# identical clones like zybo_classic). Do not present it as authoritative for unverified variants.
+# Core Notice: The reusable streaming core ddr_stream_axi itself does NOT carry a register bank;
+# it exposes raw telemetry via the ddr_csr_o : out fifo_csr_t port (see docs/CSR_CONTRACT.md).
+
+name: ddr_validator_csr
+version: 0.2.0
+address_mode: words
+base_address: 0x40000000
+addr_width: 12
+data_width: 32
+description: "AXI4-Lite control and status register file for the Zybo Z7-20 DDR validator"
+
+registers:
+  - name: CTRL
+    address: 0
+    access: rw
+    reset_value: 0x00000000
+    description: "Control register: start, soft reset, and run mode"
+    fields:
+      - name: START
+        bits: [0]
+        description: "Start strobe (W1P): write 1 to pulse BIST execution start; self-clears, reads 0"
+      - name: SOFT_RESET
+        bits: [1]
+        description: "Soft reset strobe (W1P): write 1 to pulse BIST and IP pipeline reset; self-clears, reads 0"
+      - name: CONTINUOUS
+        bits: [8]
+        description: "Continuous run mode: 0 for single-shot (default), 1 for continuous (reserved)"
+
+  - name: STATUS
+    address: 1
+    access: ro
+    reset_value: 0x00000030
+    description: "BIST execution status and verdict flags (reset_value 0x30 reflects live idle state: write_idle_i and read_idle_i high)"
+    fields:
+      - name: RUNNING
+        bits: [0]
+        description: "BIST scenario actively executing"
+      - name: DONE
+        bits: [1]
+        description: "BIST scenario completed"
+      - name: PASS
+        bits: [2]
+        description: "Verification passed (data matched word-for-word, traffic floor met)"
+      - name: FAIL
+        bits: [3]
+        description: "Verification failed (mismatch or traffic floor failure)"
+      - name: WRITE_IDLE
+        bits: [4]
+        description: "Write engine idle (live status from write_idle_i)"
+      - name: READ_IDLE
+        bits: [5]
+        description: "Read engine idle (live status from read_idle_i)"
+
+  - name: SCENARIO
+    address: 2
+    access: rw
+    reset_value: 0x00000000
+    description: "Test scenario selector (0: roundtrip, 1: boundary, 2: reset_recovery, 3: pingpong)"
+    fields:
+      - name: ID
+        bits: [3, 0]
+        description: "Scenario ID"
+        enum:
+          0: ROUNDTRIP
+          1: BOUNDARY
+          2: RESET_RECOVERY
+          3: PINGPONG
+
+  - name: N_WORDS
+    address: 3
+    access: rw
+    reset_value: 8192
+    description: "Number of 32-bit user words to transfer and verify (default: 8192)"
+    fields:
+      - name: COUNT
+        bits: [31, 0]
+        description: "Transfer word count"
+
+  - name: ERROR_COUNT
+    address: 4
+    access: ro
+    reset_value: 0x00000000
+    description: "Total mismatches observed during scenario execution"
+    fields:
+      - name: COUNT
+        bits: [31, 0]
+        description: "Mismatch counter"
+
+  - name: WORDS_WRITTEN
+    address: 5
+    access: ro
+    reset_value: 0x00000000
+    description: "S_AXIS beats accepted by the streaming IP"
+    fields:
+      - name: COUNT
+        bits: [31, 0]
+        description: "Accepted write word count"
+
+  - name: WORDS_READ
+    address: 6
+    access: ro
+    reset_value: 0x00000000
+    description: "M_AXIS beats captured from the streaming IP"
+    fields:
+      - name: COUNT
+        bits: [31, 0]
+        description: "Captured read word count"
+
+  - name: FIRST_ERR_INDEX
+    address: 7
+    access: ro
+    reset_value: 0xFFFFFFFF
+    description: "Word index of first mismatch (0xFFFFFFFF if clean)"
+    fields:
+      - name: INDEX
+        bits: [31, 0]
+        description: "Word index of first mismatch"
+
+  - name: FIRST_ERR_EXP
+    address: 8
+    access: ro
+    reset_value: 0x00000000
+    description: "Expected word pattern at first mismatch"
+    fields:
+      - name: DATA
+        bits: [31, 0]
+        description: "Expected data word"
+
+  - name: FIRST_ERR_GOT
+    address: 9
+    access: ro
+    reset_value: 0x00000000
+    description: "Observed word pattern at first mismatch"
+    fields:
+      - name: DATA
+        bits: [31, 0]
+        description: "Observed data word"
+
+  - name: WR_BASE
+    address: 10
+    access: rw
+    reset_value: 0x00000000
+    description: "DDR offset base for write ring buffer (ping-pong, DDR-P3.11)"
+    fields:
+      - name: ADDR
+        bits: [31, 0]
+        description: "Write ring buffer base address"
+
+  - name: RD_BASE
+    address: 11
+    access: rw
+    reset_value: 0x00000000
+    description: "DDR offset base for read ring buffer"
+    fields:
+      - name: ADDR
+        bits: [31, 0]
+        description: "Read ring buffer base address"
+
+  - name: BASE_LOAD
+    address: 12
+    access: rw
+    reset_value: 0x00000000
+    description: "Base address reload strobes (write-1-to-pulse)"
+    fields:
+      - name: WR_BASE_LOAD
+        bits: [0]
+        description: "Load WR_BASE strobe (W1P): write 1 to pulse base reload; self-clears, reads 0"
+      - name: RD_BASE_LOAD
+        bits: [1]
+        description: "Load RD_BASE strobe (W1P): write 1 to pulse base reload; self-clears, reads 0"
+
+  - name: PTR_RESET
+    address: 13
+    access: rw
+    reset_value: 0x00000000
+    description: "Ring pointer reset strobes (write-1-to-pulse, DDR-P3.11)"
+    fields:
+      - name: WR_PTR_RESET
+        bits: [0]
+        description: "Reset write pointer strobe (W1P): write 1 to pulse pointer reset; self-clears, reads 0"
+      - name: RD_PTR_RESET
+        bits: [1]
+        description: "Reset read pointer strobe (W1P): write 1 to pulse pointer reset; self-clears, reads 0"
+
+  - name: IDENT
+    address: 15
+    access: ro
+    reset_value: 0x0DD50200
+    description: "Hardware identity and version probe (magic DDS + IP v0.2.0)"
+    fields:
+      - name: VERSION
+        bits: [15, 0]
+        description: "IP version stamp (0x0200 = v0.2.0)"
+      - name: MAGIC
+        bits: [31, 16]
+        description: "Magic identifier (0x0DD5 = DDS)"

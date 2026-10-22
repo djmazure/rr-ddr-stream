@@ -28,28 +28,6 @@ auto_sources: true
 
 paths:
   sources: [src, ../../rtl, ../../libs]
-  libraries:
-    rr:
-      - src/ddr_validator_bist.vhd
-      - src/ddr_validator_csr.vhd
-      - ../../rtl/ddr_stream_pkg.vhd
-      - ../../rtl/support/functions_pkg.vhd
-      - ../../rtl/support/ddr_sync_cdc.vhd
-      - ../../rtl/support/skid_buffer.vhd
-      - ../../rtl/support/intel/rr_fifo_sync_xpm_body_stub.vhd
-      - ../../rtl/support/intel/rr_fifo_async_mixed_xpm_body_stub.vhd
-      - ../../rtl/support/rr_fifo_sync.vhd
-      - ../../rtl/support/rr_fifo_async_mixed.vhd
-      - ../../rtl/ddr_fifo_intf.vhd
-      - ../../rtl/ptr_mgr.vhd
-      - ../../rtl/burstw_setter.vhd
-      - ../../rtl/burstr_setter.vhd
-      - ../../rtl/axi4w.vhd
-      - ../../rtl/axi4r.vhd
-      - ../../rtl/uploader.vhd
-      - ../../rtl/downloader.vhd
-      - ../../rtl/ddr_stream_axi.vhd
-      - ../../rtl/ddr_stream_fic.vhd
 
 sources:
   sdc:

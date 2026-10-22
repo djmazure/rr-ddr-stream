@@ -85,6 +85,7 @@ architecture RTL of burstw_setter is
   signal axi4kBoundaryBurst   : unsigned(C_MAX_LEN_WIDTH - 1 downto 0)          := (others => '0');
   signal PtrFullDistance      : unsigned(buffer_width_g - 1 downto 0)           := (others => '0');
   signal PtrFullBurst         : unsigned(C_MAX_LEN_WIDTH - 1 downto 0)          := (others => '0');
+  signal PtrFullBurst_r       : unsigned(C_MAX_LEN_WIDTH - 1 downto 0)          := (others => '0');
   signal ddrCnt               : unsigned(buffer_width_g - 1 downto 0)           := (others => '0');
 
   signal ddrFull              : std_logic;
@@ -143,6 +144,18 @@ begin
   PROC_SET_BURST : process (clk_ddr_i)
   begin
     if rising_edge(clk_ddr_i) then
+      --------------------------------------------------------------------------
+      -- DDR-T2.22: register the ring's free space before the s2 clamp. The
+      -- unregistered chain (ptr_mgr wr-rd diff, C_BUFFER_SIZE - diff, the burst
+      -- shift, the s1 compare) was 16 logic levels from axi4w ddr_ptr_r and
+      -- missed setup at 125 MHz on xc7z020. The extra cycle does not change the
+      -- burst: the clamp at s2 now uses the pointers held before s1 was
+      -- captured. Inside that window the write pointer cannot move (axi4w
+      -- commits it on BRESP while cmd_ready_o is low, and the next commit needs
+      -- this setter's command), and the read pointer only advances, so the
+      -- registered free space is the same or smaller than the live one.
+      --------------------------------------------------------------------------
+      PtrFullBurst_r <= PtrFullBurst;
       --
       latch_data_cnt_s2_r <= latch_data_cnt_s1_r;
       latch_data_cnt_s3_r <= latch_data_cnt_s2_r;
@@ -153,8 +166,8 @@ begin
       --------------------------------------------------------------------------------------------
       -- Check if the amount of data to read is bigger than the maximum burst
       --------------------------------------------------------------------------------------------
-      if fifo_data_cnt_s1_r > PtrFullBurst then
-        fifo_data_cnt_s2_r <= assign_with_padding(fifo_data_cnt_s2_r, PtrFullBurst);
+      if fifo_data_cnt_s1_r > PtrFullBurst_r then
+        fifo_data_cnt_s2_r <= assign_with_padding(fifo_data_cnt_s2_r, PtrFullBurst_r);
       end if;
       -----------------------------------------------------------------------
       -- If after all, data count is over MAX BURST, saturate

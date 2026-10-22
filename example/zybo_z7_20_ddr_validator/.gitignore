@@ -17,5 +17,7 @@
 
 # Optional extra rootfs overlay tree (custom files layered onto busybox).
 # The validator app is now built declaratively from project.yml linux.apps
-# (RTL-P3.618) straight into out/rootfs — no build_app.sh, no committed binary.
 /sw/linux/rootfs_overlay/
+
+# Generated regbank HTML documentation
+register-map.html

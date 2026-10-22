@@ -165,7 +165,7 @@ entity ddr_stream_axi is
     -- endpoint-FIFO reset-busy never clears). Raw same-domain taps — correct as-is
     -- on single-clock targets (clk_sys_i = clk_ddr_i); on a 2-clock target sample
     -- in the reader's domain. Leave `open` if unused.
-    --   bit0 downloader_cs_r  bit1 uploader_cs_r  bit2 pipeBusyDdr  bit3 pipeBusy
+    --   bit0 downloader_cs  bit1 uploader_cs  bit2 pipeBusyDdr  bit3 pipeBusy
     dbg_reset_status_o : out std_logic_vector(3 downto 0) := (others => '0');
     m_axi4_h2c_bus_o : out axi4_h2c_bus_t;
     m_axi4_c2h_bus_i : in  axi4_c2h_bus_t
@@ -200,8 +200,10 @@ architecture RTL of ddr_stream_axi is
   -- Signals
   -----------------------------------------------------------------------------
   signal uploader_addr : std_logic_vector(ddr_addr_width_g - 1 downto 0);
+  signal uploader_cs   : std_logic;
   signal uploader_cs_r : std_logic;
 
+  signal downloader_cs   : std_logic;
   signal downloader_cs_r : std_logic;
   signal downloader_addr : std_logic_vector(ddr_addr_width_g - 1 downto 0);
 
@@ -446,6 +448,12 @@ begin
   -- phantom read burst, downloader_addr advanced past the (still 0) write ptr ->
   -- ptr_mgr read rd != wr = NOT empty (chip_empty=0 at baseline) -> the ring
   -- wedged, no further AR completed. Gating CS on pipeBusyDdr prevents it.
+  --
+  -- DDR-T2.17 (2026-10-09): DDR-T2.15 gated the initial CS release on pipeBusyDdr=0,
+  -- but CS and rstTimeout_r were only cleared on rst_ddr_i. If the endpoint FIFO
+  -- re-entered reset-busy via rst_sys_i alone (runtime or asymmetric reset), CS
+  -- remained asserted throughout the FIFO reset-busy window. Re-lower CS and
+  -- re-arm the init guard on ANY reset-busy (pipeBusyDdr='1').
   process(clk_ddr_i)
   begin
     if rising_edge(clk_ddr_i) then
@@ -454,6 +462,11 @@ begin
       elsif pipeBusyDdr = '0' then       -- DDR-T2.15: AND FIFO reset-busy cleared
         uploader_cs_r   <= '1';
         downloader_cs_r <= '1';
+      end if;
+      if pipeBusyDdr = '1' then          -- DDR-T2.17: re-lower CS and re-arm init guard on ANY reset-busy
+        uploader_cs_r   <= '0';
+        downloader_cs_r <= '0';
+        rstTimeout_r    <= 0;
       end if;
       if rst_ddr_i = '1' then
         uploader_cs_r   <= '0';
@@ -470,7 +483,8 @@ begin
   i_sync_cdc_pipe_busy : entity rr.ddr_sync_cdc
     generic map (
       num_stages_g => C_CDC_NUM_STAGES,
-      or_reduce_g  => false
+      or_reduce_g  => false,
+      rst_val_g    => '1'
       )
     port map (
       clk_i => clk_ddr_i,
@@ -480,18 +494,26 @@ begin
       q_o   => pipeBusyDdr
       );
 
+  -- DDR-T2.17 (2026-10-09): Combinational gating of Chip Select with not pipeBusyDdr.
+  -- In a clocked process, uploader_cs_r / downloader_cs_r take one clk_ddr cycle to drop
+  -- after pipeBusyDdr asserts. Gating CS combinationally ensures that burstw_setter and
+  -- burstr_setter never observe CS asserted while pipeBusyDdr='1', closing the single-cycle
+  -- phantom burst window and strictly satisfying the invariant below on every cycle.
+  uploader_cs   <= uploader_cs_r and not pipeBusyDdr;
+  downloader_cs <= downloader_cs_r and not pipeBusyDdr;
+
   -- DDR-T2.15 invariant (sim-checked, synthesis-ignored): a burst-setter Chip
   -- Select must NEVER be asserted while the endpoint FIFO is still reset-busy.
   -- This fires on the OLD behaviour (CS released by timeout alone) the moment a
   -- run has a busy window outlasting C_RESET_INIT_TIMEOUT — the regression guard.
-  assert not (pipeBusyDdr = '1' and (uploader_cs_r = '1' or downloader_cs_r = '1'))
+  postponed assert not (pipeBusyDdr = '1' and (uploader_cs = '1' or downloader_cs = '1'))
     report "ddr_stream_axi: Chip Select asserted during FIFO reset-busy (DDR-T2.15)"
     severity error;
 
   -- KV2-T2.2 observability tap: expose the DDR-T2.15 reset/CS state so an
   -- integrator's CSR can confirm on silicon whether the downloader is wedged
   -- with CS held low because pipeBusyDdr (FIFO reset-busy) never cleared.
-  dbg_reset_status_o <= pipeBusy & pipeBusyDdr & uploader_cs_r & downloader_cs_r;
+  dbg_reset_status_o <= pipeBusy & pipeBusyDdr & uploader_cs & downloader_cs;
 
   -----------------------------------------------------------------------------
   -- WRITE PLANE  (DDR-P1.1, 2026-05-18 — guarded by enable_write_plane_g)
@@ -543,7 +565,7 @@ begin
       port map (
         clk_ddr_i      => clk_ddr_i,
         rst_ddr_i      => rst_ddr_i,
-        cs_i           => uploader_cs_r,
+        cs_i           => uploader_cs,
         fifo_cnt_i     => fifoUpDataCnt,
         fifo_empty_i   => fifoUpEmpty,
         fifo_rd_en_o   => fifoUpRdEn,
@@ -686,7 +708,7 @@ begin
       port map (
         clk_ddr_i      => clk_ddr_i,
         rst_ddr_i      => rst_ddr_i,
-        cs_i           => downloader_cs_r,
+        cs_i           => downloader_cs,
         fifo_room_i    => fifoDownDataRoom,
         fifo_full_i    => fifoDownFull,
         fifo_wr_en_o   => fifoDownWrEn,
@@ -963,7 +985,8 @@ begin
 
   i_sync_cdc_empty : entity rr.ddr_sync_cdc
     generic map(
-      num_stages_g => C_CDC_NUM_STAGES
+      num_stages_g => C_CDC_NUM_STAGES,
+      rst_val_g    => '1'
       )
     port map (
       clk_i => clk_sys_i,
@@ -1074,6 +1097,23 @@ begin
   -- flops of the clk_sys values. The idle-contract guarantees stability
   -- on the source side when a burst is in flight, so per-bit
   -- metastability is the only concern — handled by the 2-stage flop.
+  --
+  -- DDR-P2.29: this is a QUASI-STATIC multi-bit crossing, not a synchroniser.
+  -- Each bit of *_base_addr_meta can resolve on a different clk_ddr edge, so
+  -- *_base_addr_ddr can hold a torn word for a cycle and is coherent from the
+  -- 3rd clk_ddr edge after the source changes. The protocol (DDR-REQ-211):
+  --   (1) RTL: *_base_addr_sys changes only on a load accepted while the
+  --       plane's synchronised idle flag is high (write_idle_o / read_idle_o);
+  --       a load while busy is dropped (ping_pong_concurrent_test, DDR-P4.4).
+  --   (2) Host: load the base only while the plane holds no data (after reset,
+  --       or after the ring drained), and do not feed it until the load has
+  --       settled. Idle alone does not cover this: busy reaches clk_sys 2-3
+  --       cycles late, and a partial word in the FIFO can still start a burst,
+  --       whose address adds the base combinationally (axi4w/axi4r, avmm_w/r).
+  -- A static-base consumer (load tied off) holds the source constant.
+  -- The path is bounded by constraints/ddr_stream_cdc_scoped.{xdc,sdc} and
+  -- ddr_stream_cdc_scoped_microchip.sdc (selector *_base_addr_meta), and the
+  -- four captures carry an inline RR-CDC-005 waiver naming this protocol.
   ---------------------------------------------------------------------------
   write_idle_o <= not upBusBusyCdc;
   read_idle_o  <= not downBusBusyCdc;
@@ -1116,7 +1156,7 @@ begin
           wr_base_addr_meta <= C_DDR_BASE_RST;
           wr_base_addr_ddr  <= C_DDR_BASE_RST;
         else
-          wr_base_addr_meta <= wr_base_addr_sys;
+          wr_base_addr_meta <= wr_base_addr_sys;  -- rr-lint-disable-line RR-CDC-005 quasi-static: wr_base_addr_sys loads only while write_idle_o=1 and the plane holds no data until the capture settles (DDR-REQ-211)
           wr_base_addr_ddr  <= wr_base_addr_meta;
         end if;
       end if;
@@ -1182,7 +1222,7 @@ begin
           rd_base_addr_meta <= C_DDR_BASE_RST;
           rd_base_addr_ddr  <= C_DDR_BASE_RST;
         else
-          rd_base_addr_meta <= rd_base_addr_sys;
+          rd_base_addr_meta <= rd_base_addr_sys;  -- rr-lint-disable-line RR-CDC-005 quasi-static: rd_base_addr_sys loads only while read_idle_o=1 and the plane holds no data until the capture settles (DDR-REQ-211)
           rd_base_addr_ddr  <= rd_base_addr_meta;
         end if;
       end if;

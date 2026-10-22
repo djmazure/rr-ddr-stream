@@ -31,20 +31,32 @@ datapath beyond the Xilinx/Arria-10 smoke targets. Board facts (DDR4 1 GB / 32-b
   rr P3.663 license pre-flight correctly WARNS-and-proceeds (defers to Quartus)
   rather than false-aborting — validated live here.
 
-## The target — `sources.libraries` pattern (REQUIRED for Quartus Pro)
+## The target — sources from the resolver
 
 `ddr_stream_avmm`'s rtl/ units declare `library rr; use rr.<unit>`, so they must
-compile into VHDL library `rr` — not the default `work`. Quartus **Std**
-(`quartus_map`) tolerates the mismatch; Quartus **Pro** (`quartus_syn` / DNI,
-Agilex 5) is **strict** and fails A&S with
-`Error (13785): design library "rr" does not contain primary unit ...` unless the
-`.qsf` carries `-library rr`.
+compile into VHDL library `rr`, not `work`. Quartus **Std** (`quartus_map`)
+accepts them in `work`. Quartus **Pro** (`quartus_syn`, Agilex 5) does not: A&S
+fails with `Error (13785): design library "rr" does not contain primary unit ...`
+unless the `.qsf` carries `-library rr`.
 
-Fix = the standard library mapping: each rtl unit appears in **BOTH**
-`sources.syn` (to be a compiled source) **AND** `sources.libraries.rr` (to set its
-`-library rr`; this populates `.routertl_cache/libraries.json`, which gen_project
-per-file looks up). The `libraries:` block does **not** add sources — it only
-annotates the library. olo deps stay in `sources.syn` (mapped to `olo`).
+rr places these files itself. The target declares only `paths.sources: [rtl, libs]`
+and the four open-logic packages. It has no `sources.syn` list and no
+`sources.libraries` block. The resolver walks from `ddr_stream_avmm` and selects:
+
+| Files | Library | Count |
+|---|---|---|
+| rtl/ units, including the Intel `rr_fifo_*_xpm_body_stub` bodies | `rr` | 17 |
+| open-logic primitives | `olo` | 12 |
+| Xilinx `rr_fifo_*_xpm_body` (`library xpm`) | not selected | 0 |
+
+Evidence (DDR-P3.46, 2026-10-20, queue job `a31ec75d0882`, Quartus Prime Pro
+25.3.1 patch 1.02 on `A5ED013BB32AE4SCS`): the generated `.qsf` has 29
+`VHDL_FILE` entries (17 `-library rr`, 12 `-library olo`, 0 `work`), and
+synthesis is successful with 0 errors.
+
+Before DDR-P3.46, the target hand-listed every file in `sources.syn` and repeated
+each rtl/ file in `sources.libraries.rr`. RTL-P3.672 (closed) made that manual
+pair unnecessary.
 
 ## First Agilex 5 footprint — `ddr_stream_avmm` (synth)
 
@@ -66,9 +78,7 @@ part) and the Fitter pin-fails (expected — this is a synth-only smoke, like
 ## Gotchas / how to run
 
 ```sh
-rr target set de25_agilex5_smoke
-RR_SKIP_CLOSURE_PREFLIGHT=1 rr synth run     # closure preflight false-positives on
-                                             # explicit-source targets (RTL-P3.672)
+rr queue submit synth --target de25_agilex5_smoke
 ```
 
 - **Nuke `out/de25_agilex5_smoke` before re-synth after changing the source /
@@ -82,9 +92,9 @@ RR_SKIP_CLOSURE_PREFLIGHT=1 rr synth run     # closure preflight false-positives
 
 - **RTL-P3.663** (license pre-flight empty-list branch) — VALIDATED on real
   Agilex 5 here (was unexercised on the per-family Arria-10 license).
-- **RTL-P3.672** — ergonomics: auto-infer the VHDL `library` clause so the manual
-  `sources.libraries` block isn't needed on Pro / clearer `Error 13785`
-  diagnostic / clear-stale-`.qsf`. (Open, minor — not a blocker.)
+- **RTL-P3.672** — auto-infer the VHDL `library` clause so the manual
+  `sources.libraries` block is not needed on Pro. Closed. DDR-P3.46 removed the
+  manual block from the target.
 - **RTL-P3.673** — WITHDRAWN (misdiagnosis; stale `.qsf`, not a tool defect).
 
 ## Next (Phase 1 / 2)

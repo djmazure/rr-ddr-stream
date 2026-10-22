@@ -165,6 +165,21 @@ functional_contract:
       window back to the base and never escapes [base, base+2^`G_BUFFER_WIDTH`),
       sustaining writes across many wraps when the read side keeps freeing space.
 
+  - id: DDR-REQ-211
+    kind: negative
+    desc: >-
+      BASE-ADDRESS LOAD IS QUASI-STATIC (DDR-P2.29). A `CSR_WR_BASE_LOAD` pulse
+      sampled while `WRITE_IDLE`=0, or a `CSR_RD_BASE_LOAD` pulse sampled while
+      `READ_IDLE`=0, MUST NOT change the base: the in-flight buffer completes at
+      its old base with no `M_AXI_AWADDR` / `M_AXI_ARADDR` split across two bases,
+      and the host retries once both idle flags are high. INPUT DOMAIN: the host
+      loads `CSR_WR_BASE_ADDR` / `CSR_RD_BASE_ADDR` only while that plane holds
+      no data (after reset, or after the ring drained) and does not feed it until
+      the load has settled (32 `CLK_DDR` cycles). The base reaches `CLK_DDR`
+      through a per-bit two-flop capture with no handshake, so this protocol is
+      what keeps the multi-bit crossing from being sampled torn. The four
+      captures carry `-- rr-lint-disable-line RR-CDC-005` naming this REQ.
+
   # ── Plane-elision contract (DDR-P1.1) ────────────────────────────────
   - id: DDR-REQ-400
     kind: negative
@@ -346,3 +361,16 @@ functional_contract:
       behaves exactly like a cold, never-written ring (empty, no reads). The
       pointer registers must never carry stale pre-reset position across the
       reset boundary (DDR-T2.15 coverage gap, DDR-P2.9).
+    delegated_to:
+      - ref: DDR-T2.15
+        obligation: pointer registers must not carry stale pre-reset position across reset
+
+  - id: DDR-REQ-RST-6
+    kind: negative
+    desc: >-
+      A runtime `RST_SYS` pulse after init, with `RST_DDR` held low, re-enters
+      the endpoint FIFO reset-busy window (`pipeBusyDdr` high). On every
+      `CLK_DDR` cycle of that window both `uploader_cs` and `downloader_cs`
+      stay low, including the first cycle `pipeBusyDdr` rises. After
+      `pipeBusyDdr` falls, both stay low for the full reset-init timeout
+      before either is released again.

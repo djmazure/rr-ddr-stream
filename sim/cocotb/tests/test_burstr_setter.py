@@ -16,6 +16,10 @@ cycle (not near empty/full) to latch almostEmpty_r<=0, then a diff==0 cycle to
 drive empty_r<=0; afterwards a large diff holds empty_r at 0 while keeping
 PtrEmptyBurst saturated so it never clamps the small room values under test.
 
+DDR-T3.6 adds the 4 KiB clamp at unaligned pointers, where it differs from the
+design cap (4096/bytes_per_beat - 1). test_burstr_setter_w256.py runs the same
+checks at 256 bits.
+
 NOT @requires-tagged: internal sub-block; DDR-REQ-2xx / DDR-REQ-203 cover it at
 the IP boundary.
 """
@@ -109,13 +113,15 @@ async def _prime_not_empty(dut):
     await RisingEdge(dut.clk_ddr_i)
 
 
-async def _burst_len_for_room(dut, room: int, timeout: int = 80) -> int:
+async def _burst_len_for_room(dut, room: int, ptr: int = 0,
+                              timeout: int = 80) -> int:
     """Hold the ring non-empty with a large diff (PtrEmptyBurst saturates to
-    255) and an aligned read pointer (axi4kBoundaryBurst = 64), drive `room`
-    FIFO slots, return the cmd_len_o of the emitted read burst."""
+    255) and ptr_read_i = `ptr`, drive `room` FIFO slots, return the cmd_len_o
+    of the emitted read burst. Only the low 12 bits of `ptr` set the 4 KiB
+    distance: ptr = 0 is aligned (the full 4096 B to the line)."""
     await _prime_not_empty(dut)
-    dut.ptr_write_i.value = 0x8000    # diff = 0x8000 -> not empty, PtrEmptyBurst=255
-    dut.ptr_read_i.value = 0          # aligned -> 4 KiB distance = 64 beats
+    dut.ptr_write_i.value = ptr + 0x8000   # diff = 0x8000 -> not empty, PtrEmptyBurst=255
+    dut.ptr_read_i.value = ptr
     dut.fifo_room_i.value = room
     dut.fifo_full_i.value = 0
     dut.bus_ready_i.value = 1
@@ -125,7 +131,8 @@ async def _burst_len_for_room(dut, room: int, timeout: int = 80) -> int:
         if int(dut.cmd_valid_o.value) == 1:
             return int(dut.cmd_len_o.value)
     raise AssertionError(
-        f"cmd_valid_o never asserted for room={room} within {timeout} cycles"
+        f"cmd_valid_o never asserted for room={room} ptr=0x{ptr:04X} "
+        f"within {timeout} cycles"
     )
 
 
@@ -157,11 +164,51 @@ async def sixteen_word_room_len15(dut):
 
 @cocotb.test()
 async def large_room_bounded_by_4k(dut):
-    """Large room is BOUNDED, never `-1` underflow: clamps to the 4 KiB distance
-    = 4096/64 = 64 beats -> ARLEN = 63 (fills to the 4 KiB line, no crossing)."""
+    """Large room is BOUNDED by the 4 KiB clamp, never a `-1` underflow.
+
+    DDR-T3.6: ptr_read = 0x0800 leaves 2048 B = 32 beats to the 4 KiB line, so
+    the clamp gives ARLEN = 31. The design cap (4096/64 - 1 = 63) is different
+    here. At an aligned pointer both are 63, so that case could not tell the
+    clamp from the cap."""
     await _bring_up(dut)
-    got = await _burst_len_for_room(dut, 100)
-    assert got == 63, f"100 slots: cmd_len_o must clamp to 63 (64 beats), got {got}"
+    got = await _burst_len_for_room(dut, 100, ptr=0x0800)
+    assert got == 31, (
+        f"100 slots at 0x0800: cmd_len_o must clamp to 31 (32 beats to the "
+        f"4 KiB line), got {got}")
+
+
+@cocotb.test()
+async def large_room_aligned_design_cap(dut):
+    """Aligned pointer: 4096 B to the line = 64 beats = the design cap, so
+    ARLEN = 63 (fills to the 4 KiB line, no crossing)."""
+    await _bring_up(dut)
+    got = await _burst_len_for_room(dut, 100, ptr=0)
+    assert got == 63, f"100 slots aligned: cmd_len_o must be 63, got {got}"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# DDR-T3.6 — the setter's own 4 KiB clamp at an unaligned pointer (512-bit)
+# ──────────────────────────────────────────────────────────────────────────────
+@cocotb.test()
+async def near_line_4k_clamp_512(dut):
+    """ptr_read = 0x0FC0 is 64 B = ONE 512-bit beat before the 4 KiB line, so
+    40 slots must give ARLEN = 0. Before DDR-T3.6 the null-slice "/=" in
+    get_burst_from_distance forced the design cap: cmd_len_o = 39."""
+    await _bring_up(dut)
+    got = await _burst_len_for_room(dut, 40, ptr=0x0FC0)
+    assert got == 0, (
+        f"40 slots at 0x0FC0 (512-bit): 4 KiB clamp must give cmd_len_o=0 "
+        f"(1 beat to the line), got {got}")
+
+
+@cocotb.test()
+async def mid_page_4k_clamp_512(dut):
+    """ptr_read = 0x0C00 leaves 1024 B = 16 beats: 40 slots give ARLEN = 15."""
+    await _bring_up(dut)
+    got = await _burst_len_for_room(dut, 40, ptr=0x0C00)
+    assert got == 15, (
+        f"40 slots at 0x0C00 (512-bit): 4 KiB clamp must give cmd_len_o=15 "
+        f"(16 beats to the line), got {got}")
 
 
 if __name__ == "__main__":

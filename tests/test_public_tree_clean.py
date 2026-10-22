@@ -26,6 +26,8 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "tools"))
+from public_release import PRIVATE_PATHS  # noqa: E402  (DDR-P2.31: one list)
 
 SKIP_REASON = (
     "restricted-name scanner is private to the owner bench; the public "
@@ -56,8 +58,7 @@ def _run_scan(repo: Path, ref: str = "HEAD") -> tuple[int, str]:
         "--ref",
         ref,
         "--exclude",
-        "docs/internal/",
-        "example/axe5_eagle_lpddr4_validator/",
+        *PRIVATE_PATHS,
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     return proc.returncode, proc.stdout + proc.stderr

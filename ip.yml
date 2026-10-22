@@ -38,7 +38,13 @@ license: MIT
 # not be pre-empted by a desk-only constraint add.
 # 0.3.3 (2026-10-03) is that blessing: DDR-T1.3 landed b65f92b with 16/16
 # interleaved DE25 cold boots (COMMIT tracks WRITE, capture decodes).
-version: "0.3.3"
+# 0.3.4 (2026-10-20): the burst setters register the ring distance before the
+# burst clamp (DDR-T2.22, closes the 125 MHz Zybo setup path) on top of the
+# reset, CDC and lint fixes landed since 0.3.3.
+# 0.3.5 (2026-10-22): first release through the public GitHub mirror (DDR-P2.31):
+# the registry records the public repository, so anonymous installs work. Adds the
+# functions_pkg fixes and the FDD landed since 0.3.4; three comment lines scrubbed.
+version: "0.3.5"
 
 hdl:
   # AXI is the v1 TOP. AVMM ships alongside it (DDR-P3.1, 2026-05-15)

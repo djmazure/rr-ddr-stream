@@ -19,10 +19,6 @@ hardware:
 build_options:
   tool_version: "25.3"
 
-sources:
-  syn:
-    - src/de25_led_smoke.vhd
-
 paths:
   sources:
     - src

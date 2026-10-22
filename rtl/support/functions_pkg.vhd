@@ -86,9 +86,11 @@ package body functions_pkg is
         constant C_MAX_AXI_BURST_WIDTH : integer := integer(ceil(log2(real(C_MAX_AXI_BURST)))); -- 8
         constant C_MAX_DESIGN_BURST    : integer := C_AXI_4K_BOUNDARY/bytes_per_beat; -- with 16 bytes per beat, 256 bursts
         --
-        variable result : unsigned(C_MAX_AXI_BURST_WIDTH-1 downto 0) := (others => '0');
+        variable result   : unsigned(C_MAX_AXI_BURST_WIDTH-1 downto 0) := (others => '0');
+        variable overflow : boolean := false;
     begin
-        result := (others => '0');
+        result   := (others => '0');
+        overflow := false;
         -- get the usable bits from the range that would mark the burst size
         for i in 0 to C_MAX_AXI_BURST_WIDTH-1 loop
             if i <= distance'length-C_WIDTH_PER_BURST-1 then
@@ -98,8 +100,19 @@ package body functions_pkg is
                 result(i) := '0';
             end if;
         end loop;
-        -- The bits that are above the burst size area might be signaling a bigger burst
-        if distance(distance'length-1 downto C_MAX_AXI_BURST_WIDTH+C_WIDTH_PER_BURST) /= 0 then
+        -- The bits that are above the burst size area might be signaling a bigger burst.
+        -- DDR-T3.6: scan them bit by bit, never as a slice. When the distance is
+        -- narrower than the burst field plus the beat offset (the 13-bit 4 KiB
+        -- distance at 32 B and 64 B beats) there are no such bits. A slice would
+        -- then be null, and numeric_std "/=" returns TRUE for a null argument,
+        -- which forced every 4 KiB burst to the design cap. An empty loop range
+        -- leaves overflow false.
+        for i in C_MAX_AXI_BURST_WIDTH+C_WIDTH_PER_BURST to distance'length-1 loop
+          if distance(i) = '1' then
+            overflow := true;
+          end if;
+        end loop;
+        if overflow then
           result := (others => '1');
         else
           -- As we want the result in bursts, if distance is 1, the burst is 0

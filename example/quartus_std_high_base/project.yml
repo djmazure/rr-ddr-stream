@@ -34,40 +34,17 @@ build_options:
 toolchain:
   tool: quartus-std-23.1
 
-# Same AVMM closure as targets/quartus_smoke.yml, plus the high-base wrapper.
-# xpm_body files INTENTIONALLY omitted — Quartus rejects `library xpm`.
-sources:
-  syn:
-    - rtl/ddr_stream_pkg.vhd
-    - rtl/support/functions_pkg.vhd
-    - rtl/support/ddr_sync_cdc.vhd
-    - rtl/support/skid_buffer.vhd
-    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_array.vhd
-    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_math.vhd
-    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_logic.vhd
-    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_string.vhd
-    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_pkg_attribute.vhd
-    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_cc_bits.vhd
-    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_cc_reset.vhd
-    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_ram_sdp.vhd
-    - libs/open-logic/olo_base_fifo_sync/src/base/vhdl/olo_base_fifo_sync.vhd
-    - libs/open-logic/olo_base_fifo_async/src/base/vhdl/olo_base_fifo_async.vhd
-    - libs/open-logic/olo_base_wconv_n2xn/src/base/vhdl/olo_base_wconv_n2xn.vhd
-    - libs/open-logic/olo_base_wconv_xn2n/src/base/vhdl/olo_base_wconv_xn2n.vhd
-    - rtl/support/intel/rr_fifo_sync_xpm_body_stub.vhd
-    - rtl/support/intel/rr_fifo_async_mixed_xpm_body_stub.vhd
-    - rtl/support/rr_fifo_sync.vhd
-    - rtl/support/rr_fifo_async_mixed.vhd
-    - rtl/ddr_fifo_intf.vhd
-    - rtl/ptr_mgr.vhd
-    - rtl/burstw_setter.vhd
-    - rtl/burstr_setter.vhd
-    - rtl/avmm/avmm_w.vhd
-    - rtl/avmm/avmm_r.vhd
-    - rtl/avmm/uploader_avmm.vhd
-    - rtl/avmm/downloader_avmm.vhd
-    - rtl/ddr_stream_avmm.vhd
-    - example/quartus_std_high_base/src/ddr_stream_avmm_high_base.vhd
+# Sources come from the resolver (DDR-P3.46): it walks paths.sources from the
+# wrapper top and, for vendor altera, selects the GHDL/Quartus-safe Intel
+# rr_fifo_*_xpm_body_stub bodies, never the `library xpm` Xilinx ones. The olo
+# primitives are declared as packages so the lock attributes them to library olo.
+# Queue job 82e899003d6c (2026-10-20, 23.1std.0): 30 VHDL_FILE entries, 18 rr +
+# 12 olo + 0 work; map.rpt ddr_base_addr_g = x"80000000"; 0 errors.
+packages:
+  open-logic/olo_base_fifo_sync: ^4.4.1
+  open-logic/olo_base_fifo_async: ^4.4.1
+  open-logic/olo_base_wconv_n2xn: ^4.4.1
+  open-logic/olo_base_wconv_xn2n: ^4.4.1
 
 paths:
   sources:

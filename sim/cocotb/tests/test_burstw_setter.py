@@ -11,6 +11,10 @@ so fifoDataCnt >= 1 at the sample cycle. Therefore:
   * N words (< clamps) -> cmd_len_o = N-1
   * large count        -> BOUNDED by the 4 KiB-distance clamp, never underflow.
 
+DDR-T3.6 adds the 4 KiB clamp at unaligned pointers, where it differs from the
+design cap (4096/bytes_per_beat - 1). test_burstw_setter_w256.py runs the same
+checks at 256 bits.
+
 These tests prove exactly that. NOT @requires-tagged: burstw_setter is an
 internal sub-block; the IP-boundary contract (DDR-REQ-2xx / DDR-REQ-203 4 KiB)
 covers its externally-observable behaviour. This file is development
@@ -20,7 +24,7 @@ ticket removed).
 Harness pattern per test_ptr_mgr.py: flat-port entity, direct cocotb attach,
 run_simulation(top_level="burstw_setter", custom_libraries=...). With the
 512-bit default (64 B/beat), 4096 B to the next 4 KiB boundary = 64 beats, so
-aligned pointers give axi4kBoundaryBurst = 64.
+aligned pointers give axi4kBoundaryBurst = 63 (beats - 1).
 """
 
 from __future__ import annotations
@@ -94,11 +98,16 @@ async def _bring_up(dut, period_ns: float = 10.0):
         await RisingEdge(dut.clk_ddr_i)
 
 
-async def _burst_len_for_count(dut, count: int, timeout: int = 80) -> int:
-    """Drive `count` FIFO words with aligned pointers (ptr=0 => ddrFull=0,
-    4 KiB distance = 64 beats) and return the cmd_len_o of the emitted burst."""
-    dut.ptr_write_i.value = 0
-    dut.ptr_read_i.value = 0
+async def _burst_len_for_count(dut, count: int, ptr: int = 0,
+                               timeout: int = 80) -> int:
+    """Drive `count` FIFO words with ptr_write_i = ptr_read_i = `ptr` and
+    return the cmd_len_o of the emitted burst.
+
+    Equal pointers keep the ring empty (ddrCnt = 0, so PtrFullBurst saturates
+    and never clamps). Only the low 12 bits of `ptr` set the 4 KiB distance:
+    ptr = 0 is aligned (the full 4096 B to the line)."""
+    dut.ptr_write_i.value = ptr
+    dut.ptr_read_i.value = ptr
     dut.fifo_cnt_i.value = count
     dut.fifo_empty_i.value = 0
     dut.bus_ready_i.value = 1
@@ -108,7 +117,8 @@ async def _burst_len_for_count(dut, count: int, timeout: int = 80) -> int:
         if int(dut.cmd_valid_o.value) == 1:
             return int(dut.cmd_len_o.value)
     raise AssertionError(
-        f"cmd_valid_o never asserted for count={count} within {timeout} cycles"
+        f"cmd_valid_o never asserted for count={count} ptr=0x{ptr:04X} "
+        f"within {timeout} cycles"
     )
 
 
@@ -146,12 +156,52 @@ async def sixteen_word_len15(dut):
 
 @cocotb.test()
 async def large_count_bounded_by_4k(dut):
-    """A large count is BOUNDED, never a `-1` underflow: with aligned pointers
-    it clamps to the 4 KiB distance = 4096/64 = 64 beats -> AWLEN = 63 (the last
-    beat exactly fills to the 4 KiB line without crossing it)."""
+    """A large count is BOUNDED by the 4 KiB clamp, never a `-1` underflow.
+
+    DDR-T3.6: ptr = 0x0800 leaves 2048 B = 32 beats to the 4 KiB line, so the
+    clamp gives AWLEN = 31. The design cap (4096/64 - 1 = 63) is different
+    here. At an aligned pointer both are 63, so that case could not tell the
+    clamp from the cap."""
     await _bring_up(dut)
-    got = await _burst_len_for_count(dut, 100)
-    assert got == 63, f"100 words: cmd_len_o must clamp to 63 (64 beats), got {got}"
+    got = await _burst_len_for_count(dut, 100, ptr=0x0800)
+    assert got == 31, (
+        f"100 words at 0x0800: cmd_len_o must clamp to 31 (32 beats to the "
+        f"4 KiB line), got {got}")
+
+
+@cocotb.test()
+async def large_count_aligned_design_cap(dut):
+    """Aligned pointer: 4096 B to the line = 64 beats = the design cap, so
+    AWLEN = 63 (the last beat exactly fills to the 4 KiB line)."""
+    await _bring_up(dut)
+    got = await _burst_len_for_count(dut, 100, ptr=0)
+    assert got == 63, f"100 words aligned: cmd_len_o must be 63, got {got}"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# DDR-T3.6 — the setter's own 4 KiB clamp at an unaligned pointer (512-bit)
+# ──────────────────────────────────────────────────────────────────────────────
+@cocotb.test()
+async def near_line_4k_clamp_512(dut):
+    """ptr = 0x0FC0 is 64 B = ONE 512-bit beat before the 4 KiB line, so 40
+    words must give AWLEN = 0. Before DDR-T3.6 get_burst_from_distance took a
+    null slice, numeric_std "/=" returned TRUE, and the burst was forced to the
+    design cap: cmd_len_o = 39, a 40-beat burst across the line."""
+    await _bring_up(dut)
+    got = await _burst_len_for_count(dut, 40, ptr=0x0FC0)
+    assert got == 0, (
+        f"40 words at 0x0FC0 (512-bit): 4 KiB clamp must give cmd_len_o=0 "
+        f"(1 beat to the line), got {got}")
+
+
+@cocotb.test()
+async def mid_page_4k_clamp_512(dut):
+    """ptr = 0x0C00 leaves 1024 B = 16 beats: 40 words give AWLEN = 15."""
+    await _bring_up(dut)
+    got = await _burst_len_for_count(dut, 40, ptr=0x0C00)
+    assert got == 15, (
+        f"40 words at 0x0C00 (512-bit): 4 KiB clamp must give cmd_len_o=15 "
+        f"(16 beats to the line), got {got}")
 
 
 if __name__ == "__main__":
