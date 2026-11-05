@@ -48,11 +48,11 @@ from pathlib import Path
 
 import yaml
 
-# Tracked paths that never reach the public mirror. They hold bench evidence
-# and a board example that carry restricted names by design.
+# Tracked paths that never reach the public mirror: bench evidence that carries
+# restricted names by design. Every example ships publicly; a board example
+# that needs a private input is rewritten, not dropped (DDR-P3.42).
 PRIVATE_PATHS = (
     "docs/internal/",
-    "example/axe5_eagle_lpddr4_validator/",
 )
 
 PUBLIC_MIRROR_URL = "https://github.com/djmazure/rr-ddr-stream"

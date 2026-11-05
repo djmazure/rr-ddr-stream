@@ -1,3 +1,8 @@
 # DDR-T1.3: raw silicon evidence (serial console CRLF, wire captures) is kept
 # byte-verbatim, so whitespace checks do not apply to it.
 docs/internal/ddr_t1_3_witness/** -whitespace
+
+# DDR-P3.42: vendor IP configuration files (.ip, Platform Designer XML) are
+# board facts copied from the board vendor's reference design. Keep them
+# byte-verbatim: no line-ending conversion, no whitespace checks.
+example/*/ip/**/*.ip -text -whitespace

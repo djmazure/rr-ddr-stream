@@ -137,8 +137,8 @@ def main() -> None:
                 str(_SUPPORT_DIR / "ddr_sync_cdc.vhd"),
                 str(_SUPPORT_DIR / "skid_buffer.vhd"),       # used by axi4w (VFIFO-T1 fix)
                 # RR--P3.3: xpm_body entities (Xilinx-only — file-scope
-                # `library xpm`) — must be analysed BEFORE the wrappers
-                # that reference them via `entity work.*_xpm_body`. NVC
+                # `library xpm`). The wrappers instantiate them as components
+                # (DDR-P1.2), bound at elaboration, which the xpm lane needs. NVC
                 # accepts the xpm-library decl because of the precompiled
                 # xpm_vhdl shim in vendor_libraries; Quartus consumers
                 # never see these because synth flows source ip.yml's

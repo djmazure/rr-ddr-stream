@@ -1,0 +1,33 @@
+# Linux memory map for axe5_eagle_lpddr4_validator.
+#
+# ddr_validator_csr is the only slave on the lightweight HPS-to-FPGA bridge.
+# Its window starts at 0x20000000 in the Agilex 5 HPS address map. The test
+# data stays in the fabric LPDDR4, so no HPS DDR region is reserved.
+#
+# A userspace access through /dev/mem works only when:
+#   1. the fabric is configured (the SOF is loaded before the HPS boots), and
+#   2. the boot script ran `bridge enable` (project.yml hps_fpga_bridges: all).
+#      Otherwise the bridge is held in reset and the access faults (SIGBUS).
+
+version: "1.0.0"
+target: agilex5-hps
+
+regions:
+  - name: ddr_validator_csr
+    base_addr: 0x20000000
+    span: 0x1000
+    description: >
+      AXI4-Lite register block of the fabric BIST: control, status, error
+      capture. Used by the ddr_validator application through /dev/mem.
+    registers:
+      - {offset: 0x00, name: IDENT,       access: RO, reset: 0x0DD50200}
+      - {offset: 0x04, name: CONTROL,     access: RW, reset: 0x00000000}
+      - {offset: 0x08, name: SCENARIO,    access: RW, reset: 0x00000000}
+      - {offset: 0x0C, name: N_WORDS,     access: RW, reset: 0x00010000}
+      - {offset: 0x10, name: STATUS,      access: RO, reset: 0x00000000}
+      - {offset: 0x14, name: ERROR_COUNT, access: RO, reset: 0x00000000}
+      - {offset: 0x18, name: WORDS_WR,    access: RO, reset: 0x00000000}
+      - {offset: 0x1C, name: WORDS_RD,    access: RO, reset: 0x00000000}
+      - {offset: 0x20, name: ERR_INDEX,   access: RO, reset: 0x00000000}
+      - {offset: 0x24, name: ERR_EXP_LO,  access: RO, reset: 0x00000000}
+      - {offset: 0x28, name: ERR_GOT_LO,  access: RO, reset: 0x00000000}

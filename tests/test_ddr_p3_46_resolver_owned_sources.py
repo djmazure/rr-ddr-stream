@@ -66,7 +66,7 @@ def test_config_census_is_not_empty() -> None:
     rels = {_rel(p) for p in _config_files()}
     for expected in (
         "example/zybo_z7_20_ddr_validator/project.yml",
-        "example/axe5_eagle_lpddr4_validator/targets/jtag.yml",
+        "example/axe5_eagle_lpddr4_validator/project.yml",
         "example/de25_led_smoke/project.yml",
         "targets/de25_agilex5_smoke.yml",
     ):

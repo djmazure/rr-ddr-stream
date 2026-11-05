@@ -122,8 +122,8 @@ def main() -> None:
                 str(_SUPPORT_DIR / "ddr_sync_cdc.vhd"),
                 str(_SUPPORT_DIR / "skid_buffer.vhd"),
                 # RR--P3.3: xpm_body entities (Xilinx-only — file-scope
-                # `library xpm`) — analysed before the wrappers that
-                # reference them via `entity work.*_xpm_body`. Same gating
+                # `library xpm`). The wrappers instantiate them as components
+                # (DDR-P1.2), bound at elaboration. Same gating
                 # as the AXI test; the synth flow on Quartus never sees
                 # these because ip.yml splits them under sources_per_vendor.
                 str(_SUPPORT_DIR / "xilinx" / "rr_fifo_sync_xpm_body.vhd"),

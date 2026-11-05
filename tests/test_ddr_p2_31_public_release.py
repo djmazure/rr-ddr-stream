@@ -85,7 +85,6 @@ def _source(tmp_path: Path, *, rtl: str = "-- clean\n",
     _write(repo, "ip.yml", f'name: rr_ddr_stream\nversion: "{version}"\n')
     _write(repo, "rtl/x.vhd", rtl)
     _write(repo, "docs/internal/witness.md", internal)
-    _write(repo, "example/axe5_eagle_lpddr4_validator/a.tcl", internal)
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "src")
     return repo
@@ -238,8 +237,7 @@ def test_head_public_tree_is_clean():
         assert env.get("RR_REQUIRE_PUBLIC_SCAN") != "1", f"scanner missing: {scanner}"
         pytest.skip("restricted-name scanner is private to the owner bench")
     r = subprocess.run([sys.executable, str(scanner), str(REPO_ROOT), "--ref", "HEAD",
-                        "--exclude", "docs/internal/",
-                        "example/axe5_eagle_lpddr4_validator/"],
+                        "--exclude", "docs/internal/"],
                        capture_output=True, text=True, env=env)
     lines = (r.stdout + r.stderr).splitlines()
     assert r.returncode == 0 and "HITS: 0" in lines, (

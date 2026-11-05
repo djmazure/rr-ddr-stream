@@ -133,6 +133,43 @@ architecture rtl of rr_fifo_sync is
     if fwft_g then return "fwft"; else return "std"; end if;
   end function;
 
+  -- DDR-P1.2: the XPM body is bound through a COMPONENT, not a direct
+  -- `entity work.` instance. A direct entity instance must name an entity
+  -- that is already analyzed, even inside a generate branch that is never
+  -- taken, so Synplify (Libero/PolarFire) stopped with CD590 on every
+  -- non-Xilinx build that compiles no body file. A component instance in the
+  -- untaken branch is never elaborated, so the body is needed only when
+  -- fifo_impl_g = "xpm"; Vivado binds it to the real body by default binding.
+  -- Keep this declaration identical to rr_fifo_sync_xpm_body's entity.
+  component rr_fifo_sync_xpm_body is
+    generic (
+      fifo_depth_g        : positive;
+      data_width_g        : positive;
+      fwft_g              : boolean := true;
+      prog_full_thresh_g  : natural := 0;
+      prog_empty_thresh_g : natural := 0
+    );
+    port (
+      clk_i           : in  std_logic;
+      rst_i           : in  std_logic;
+      din_i           : in  std_logic_vector(data_width_g-1 downto 0);
+      wr_en_i         : in  std_logic;
+      full_o          : out std_logic;
+      almost_full_o   : out std_logic;
+      prog_full_o     : out std_logic;
+      overflow_o      : out std_logic;
+      rd_en_i         : in  std_logic;
+      dout_o          : out std_logic_vector(data_width_g-1 downto 0);
+      empty_o         : out std_logic;
+      almost_empty_o  : out std_logic;
+      prog_empty_o    : out std_logic;
+      underflow_o     : out std_logic;
+      data_valid_o    : out std_logic;
+      data_cnt_o      : out std_logic_vector(integer(ceil(log2(real(fifo_depth_g+1))))-1 downto 0);
+      rst_busy_o      : out std_logic
+    );
+  end component rr_fifo_sync_xpm_body;
+
 begin
 
   -----------------------------------------------------------------------------
@@ -140,7 +177,7 @@ begin
   -- RR--P3.3: body delegated to rr_fifo_sync_xpm_body (vendor-gated).
   -----------------------------------------------------------------------------
   GEN_XPM : if C_IMPL = "xpm" generate
-    i_xpm_body : entity work.rr_fifo_sync_xpm_body
+    i_xpm_body : component rr_fifo_sync_xpm_body
       generic map (
         fifo_depth_g        => fifo_depth_g,
         data_width_g        => data_width_g,

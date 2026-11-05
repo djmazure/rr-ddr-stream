@@ -210,6 +210,43 @@ architecture rtl of rr_fifo_async_mixed is
     return std_logic_vector(v);
   end function;
 
+  -- DDR-P1.2: component, not `entity work.`, so a build with no body file
+  -- analyzes this wrapper (see rr_fifo_sync). Keep this declaration identical
+  -- to rr_fifo_async_mixed_xpm_body's entity.
+  component rr_fifo_async_mixed_xpm_body is
+    generic (
+      wr_data_width_g       : positive;
+      rd_data_width_g       : positive;
+      fifo_wr_depth_g       : positive;
+      fwft_g                : boolean := true;
+      cdc_sync_stages_g     : positive range 2 to 4 := 2;
+      prog_full_thresh_g    : natural := 0;
+      prog_empty_thresh_g   : natural := 0;
+      wr_data_count_width_g : positive := 12;
+      rd_data_count_width_g : positive := 12
+    );
+    port (
+      rst_i           : in  std_logic;
+      wr_clk_i        : in  std_logic;
+      din_i           : in  std_logic_vector(wr_data_width_g-1 downto 0);
+      wr_en_i         : in  std_logic;
+      full_o          : out std_logic;
+      almost_full_o   : out std_logic;
+      prog_full_o     : out std_logic;
+      wr_data_count_o : out std_logic_vector(wr_data_count_width_g-1 downto 0);
+      wr_rst_busy_o   : out std_logic;
+      rd_clk_i        : in  std_logic;
+      rd_en_i         : in  std_logic;
+      dout_o          : out std_logic_vector(rd_data_width_g-1 downto 0);
+      empty_o         : out std_logic;
+      almost_empty_o  : out std_logic;
+      prog_empty_o    : out std_logic;
+      data_valid_o    : out std_logic;
+      rd_data_count_o : out std_logic_vector(rd_data_count_width_g-1 downto 0);
+      rd_rst_busy_o   : out std_logic
+    );
+  end component rr_fifo_async_mixed_xpm_body;
+
 begin
 
   -----------------------------------------------------------------------------
@@ -219,7 +256,7 @@ begin
   GEN_XPM : if C_IMPL = "xpm" generate
     signal full_xpm_s : std_logic;
   begin
-    i_xpm_body : entity work.rr_fifo_async_mixed_xpm_body
+    i_xpm_body : component rr_fifo_async_mixed_xpm_body
       generic map (
         wr_data_width_g       => wr_data_width_g,
         rd_data_width_g       => rd_data_width_g,

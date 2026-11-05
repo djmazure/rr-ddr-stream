@@ -109,6 +109,40 @@ architecture rtl of rr_fifo_async is
     if fwft_g then return "fwft"; else return "std"; end if;
   end function;
 
+  -- DDR-P1.2: component, not `entity work.`, so a build with no body file
+  -- analyzes this wrapper (see rr_fifo_sync). Keep this declaration identical
+  -- to rr_fifo_async_xpm_body's entity.
+  component rr_fifo_async_xpm_body is
+    generic (
+      fifo_depth_g        : positive;
+      data_width_g        : positive;
+      fwft_g              : boolean := true;
+      cdc_sync_stages_g   : positive range 2 to 4 := 2;
+      prog_full_thresh_g  : natural := 0;
+      prog_empty_thresh_g : natural := 0
+    );
+    port (
+      rst_i           : in  std_logic;
+      wr_clk_i        : in  std_logic;
+      din_i           : in  std_logic_vector(data_width_g-1 downto 0);
+      wr_en_i         : in  std_logic;
+      full_o          : out std_logic;
+      almost_full_o   : out std_logic;
+      prog_full_o     : out std_logic;
+      wr_data_count_o : out std_logic_vector(integer(ceil(log2(real(fifo_depth_g+1))))-1 downto 0);
+      wr_rst_busy_o   : out std_logic;
+      rd_clk_i        : in  std_logic;
+      rd_en_i         : in  std_logic;
+      dout_o          : out std_logic_vector(data_width_g-1 downto 0);
+      empty_o         : out std_logic;
+      almost_empty_o  : out std_logic;
+      prog_empty_o    : out std_logic;
+      data_valid_o    : out std_logic;
+      rd_data_count_o : out std_logic_vector(integer(ceil(log2(real(fifo_depth_g+1))))-1 downto 0);
+      rd_rst_busy_o   : out std_logic
+    );
+  end component rr_fifo_async_xpm_body;
+
 begin
 
   -----------------------------------------------------------------------------
@@ -116,7 +150,7 @@ begin
   -- RR--P3.3: body delegated to rr_fifo_async_xpm_body (vendor-gated).
   -----------------------------------------------------------------------------
   GEN_XPM : if fifo_impl_g = "xpm" generate
-    i_xpm_body : entity work.rr_fifo_async_xpm_body
+    i_xpm_body : component rr_fifo_async_xpm_body
       generic map (
         fifo_depth_g        => fifo_depth_g,
         data_width_g        => data_width_g,

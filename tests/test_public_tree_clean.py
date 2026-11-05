@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 """DDR-P2.26 regression guard — scrub restricted names and bench identifiers.
 
-Verifies that the public tree (everything except docs/internal/ and
-example/axe5_eagle_lpddr4_validator/) is free of restricted client names
+Verifies that the public tree (everything except the PRIVATE_PATHS of
+tools/public_release.py, today docs/internal/) is free of restricted client names
 and bench identifiers (cable serials, USB serials, home directory paths).
 
 The restricted-name list is private by design and is never copied into this

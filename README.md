@@ -1,13 +1,22 @@
 # rr-ddr-stream
 
 A ring-buffered DDR-backed streaming-DMA primitive for FPGA designs.
-Ships an AXI4 master backend (Xilinx targets) and — once DDR-P3.1 lands —
-an Avalon-MM master backend (Intel targets), in a single IP library with
-two TOP entities.
+VHDL, MIT-licensed. One IP library with three TOP entities: an AXI4 master
+(`ddr_stream_axi`, Xilinx targets), an Avalon-MM master (`ddr_stream_avmm`,
+Intel/Altera targets) and an AXI4 master for the PolarFire SoC MSS FIC
+(`ddr_stream_fic`, Microchip targets).
 
-Carved out of [`rr-vfifo`](https://bitbucket.org/dasjimaz/rr-vfifo) on
-2026-05-15. `rr-vfifo` now depends on this IP for its bus-master and
-pointer-math substrate.
+The public home of the `routertl/rr_ddr_stream` package on
+[registry.routertl.dev](https://registry.routertl.dev) is
+[github.com/djmazure/rr-ddr-stream](https://github.com/djmazure/rr-ddr-stream).
+The registry pins that repository's commits, so an anonymous install works:
+
+```
+rr pkg add routertl/rr_ddr_stream
+```
+
+Carved out of `rr-vfifo` on 2026-05-15. `rr-vfifo` now depends on this IP
+for its bus-master and pointer-math substrate.
 
 ## Lineage
 
@@ -110,6 +119,25 @@ model: [`cocotbext-axi`](https://github.com/alexforencich/cocotbext-axi)'s
 | `test_ddr_stream_axi` | End-to-end AXI: mem_model_demo, 4k_boundary, reset_attack, cleaver_n20_axi_trace |
 | `test_ddr_stream_avmm` | Same battery, AVMM bus protocol — once RTL-P3.495 + DDR-P3.1 land |
 
+## Releases and the public mirror
+
+Development happens in a private repository. The public repository holds
+release snapshots only: each commit is the private tree at a release tag,
+minus the paths in `PRIVATE_PATHS` of `tools/public_release.py` (bench
+evidence), squashed into one commit and tagged
+`v<version>`. The public history therefore has one commit per snapshot, and there
+is no RouteRTL SDK builtin copy of this IP.
+
+| Step | Command | What it guarantees |
+|---|---|---|
+| 1 | `tools/public_release.py check --ref <tag>` | The public tree of the tag scans clean for restricted names. |
+| 2 | `tools/public_release.py snapshot --ref <tag> --mirror <checkout>` | The squash commit is re-scanned in the mirror before the branch and tag move. Nothing is pushed. |
+| 3 | push the mirror branch and tag | Owner action. |
+| 4 | `tools/public_release.py publish --mirror <checkout>` | Runs `rr pkg publish` only from a clean, tagged, clean-scanning checkout whose origin is the public repository, so the registry records the public `git_url` and the snapshot commit. |
+
+Do not commit to the public repository directly. A change made there is
+overwritten by the next snapshot.
+
 ## License
 
-Same as `rr-vfifo` (TBD — slated for the routertl public-registry pass).
+MIT, see `LICENSE`. The RouteRTL SDK itself is licensed separately.

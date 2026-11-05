@@ -506,9 +506,18 @@ begin
   -- Select must NEVER be asserted while the endpoint FIFO is still reset-busy.
   -- This fires on the OLD behaviour (CS released by timeout alone) the moment a
   -- run has a busy window outlasting C_RESET_INIT_TIMEOUT — the regression guard.
+  --
+  -- DDR-P1.2: Synplify (Libero/PolarFire) does not accept a concurrent
+  -- `postponed assert` (CD214 "Not a concurrent statement") and aborts the
+  -- compile, so the check is hidden from synthesis by translate_off/on.
+  -- Simulators ignore the pragma, so the check keeps its postponed form there:
+  -- it reads uploader_cs / downloader_cs only after the delta cycles in which
+  -- the gate above settles, and cannot fire on a delta glitch.
+  -- synthesis translate_off
   postponed assert not (pipeBusyDdr = '1' and (uploader_cs = '1' or downloader_cs = '1'))
     report "ddr_stream_axi: Chip Select asserted during FIFO reset-busy (DDR-T2.15)"
     severity error;
+  -- synthesis translate_on
 
   -- KV2-T2.2 observability tap: expose the DDR-T2.15 reset/CS state so an
   -- integrator's CSR can confirm on silicon whether the downloader is wedged

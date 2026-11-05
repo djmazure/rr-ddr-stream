@@ -16,6 +16,16 @@
 # skid_buffer, CDC primitives) are shared. VHDL elaboration prunes unused
 # backend entities at synth, so no LUT cost for single-backend users.
 
+# PUBLIC HOME (DDR-P3.31, the rr-rea pattern of RTL-D.218): the registry
+# package routertl/rr_ddr_stream resolves from github.com/djmazure/rr-ddr-stream.
+# `rr pkg publish` runs only from a checkout of that repository, through
+# `tools/public_release.py publish`, so the registry pins its commits and
+# `rr pkg add routertl/rr_ddr_stream` clones it anonymously. THIS private tree
+# is the development home. The public repository holds squash snapshots of a
+# release tag minus PRIVATE_PATHS (tools/public_release.py), one commit per
+# snapshot. There is no routertl SDK builtin copy, so the only drift to watch
+# is private tag vs public snapshot, and the snapshot step removes it.
+
 # Unified ip.yml shape (RTL-P3.189 / D.58): identity at the ROOT (top-level
 # name/namespace/version), so `rr pkg publish` reads them directly.
 name: rr_ddr_stream
@@ -48,7 +58,12 @@ license: MIT
 # refuse (DDR-T2.23): a ring distance under one beat no longer sizes a 256-beat
 # burst, so a sub-beat software pointer neither over-reads nor overwrites unread
 # data. 0.3.5 was tagged but never published to the registry.
-version: "0.3.6"
+# 0.3.7 (2026-11-05): compiles under Synplify (DDR-P1.2, 21e204b): the xpm
+# bodies are bound through components and the postponed assert is hidden from
+# synthesis. Also ships the AXE5-Eagle LPDDR4 validator example as an rr-only
+# build (DDR-P3.42) and names the public home, license and release path in the
+# README (DDR-P3.31).
+version: "0.3.7"
 
 hdl:
   # AXI is the v1 TOP. AVMM ships alongside it (DDR-P3.1, 2026-05-15)
@@ -121,7 +136,14 @@ synthesis:
       - rtl/support/intel/rr_fifo_sync_xpm_body_stub.vhd
       - rtl/support/intel/rr_fifo_async_xpm_body_stub.vhd
       - rtl/support/intel/rr_fifo_async_mixed_xpm_body_stub.vhd
-    # DDR-P2.15: Microchip PolarFire SoC targets use the same vendor-neutral stubs
+    # DDR-P2.15: Microchip PolarFire SoC targets use the same vendor-neutral stubs.
+    # DDR-P1.2 (2026-11-03): the stubs are no longer load-bearing. The DeepSkopion
+    # Libero build (DS-P1.83) got no body and no stub: the Libero flow drops
+    # */support/xilinx/* and the stubs below never reached it, so Synplify stopped
+    # with CD590 on the direct `entity work.*_xpm_body` instance. The wrappers
+    # now instantiate the body as a COMPONENT, which an untaken generate branch
+    # never elaborates, so any vendor compiles with no body file at all. The
+    # mappings stay for consumers that already rely on them.
     microchip:
       - rtl/support/intel/rr_fifo_sync_xpm_body_stub.vhd
       - rtl/support/intel/rr_fifo_async_xpm_body_stub.vhd

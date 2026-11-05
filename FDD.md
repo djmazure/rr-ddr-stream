@@ -284,7 +284,7 @@ flowchart LR
 | `skid_buffer` | `rtl/support/skid_buffer.vhd` | 2-deep skid buffer |
 | `rr_fifo_sync`, `rr_fifo_async`, `rr_fifo_async_mixed` | `rtl/support/` | FIFO wrappers; `fifo_impl_g` selects open-logic (`"olo"`) or Xilinx XPM (`"xpm"`) |
 
-Vendor-specific XPM bodies and their stubs are selected by `ip.yml` `synthesis.sources_per_vendor`.
+Vendor-specific XPM bodies and their stubs are selected by `ip.yml` `synthesis.sources_per_vendor`. Each wrapper instantiates its XPM body as a component (DDR-P1.2), so a build with no body file (the Libero / Synplify flow) still compiles when `fifo_impl_g = "olo"`. The body is needed only when `fifo_impl_g = "xpm"`.
 
 ### Configuration generics
 
