@@ -74,8 +74,10 @@ functional_contract:
       End-to-end round-trip: N consecutive `S_AXIS_DATA` values accepted on
       `CLK_SYS` (`S_AXIS_VALID`=1 & `S_AXIS_READY`=1), after the IP commits them
       to DDR, are returned on `M_AXIS_DATA` (`M_AXIS_VALID`=1) in the same FIFO
-      order regardless of the AXI4 memory model's burst shape or latency. This
-      subsumes "no lost / no duplicate message".
+      order regardless of the AXI4 memory model's burst shape or latency. What
+      the consecutive-values test shows is this ordering and equality for
+      back-to-back writes. It does not cover writes timed against the idle
+      flush; loss, duplication and zero messages there are DDR-REQ-FLUSH-3.
 
   - id: DDR-REQ-002
     kind: behavioral
@@ -374,3 +376,69 @@ functional_contract:
       stay low, including the first cycle `pipeBusyDdr` rises. After
       `pipeBusyDdr` falls, both stay low for the full reset-init timeout
       before either is released again.
+
+  # ── Idle flush of a partial DDR word (DDR-T2.24) ─────────────────────────
+  # One DDR word holds C_MSGS_PER_WORD = G_DDR_DATA_WIDTH / G_USER_DATA_WIDTH
+  # messages (the ratio: 4 at 128-bit, 8 at 256-bit). A word with fewer
+  # messages waits in the write path until the producer goes idle; the idle
+  # flush then completes it with zero messages so it commits.
+  #
+  # Internal timers and thresholds whose arrival phase belongs to the input
+  # domain (an accepted write may land on any cycle relative to them). Found by
+  #   grep -n -E "constant C_[A-Z_]*(THRES|TIMEOUT|WAIT|MIN_BURST|IDLE|CYCLES)" rtl/*.vhd rtl/*/*.vhd
+  # at 006615e:
+  #   * ddr_fifo_intf C_IDLE_FLUSH_THRES = 128 CLK_SYS cycles (the idle flush):
+  #     DDR-REQ-FLUSH-2, swept at the trigger cycle and one cycle before and after.
+  #   * burstw_setter C_MIN_BURST = 15 CLK_DDR cycles (a write burst starts
+  #     with fewer than 16 words after this wait); its words are already whole
+  #     DDR words, so a producer write cannot split one. Not swept by a test.
+  #   * burstr_setter C_MIN_BURST = 15 CLK_DDR cycles (read side, the same wait
+  #     for read bursts); not on the producer path. Not swept by a test.
+  #   * ddr_stream_axi / ddr_stream_avmm C_RESET_INIT_TIMEOUT = 64 (endpoint FIFO
+  #     reset-busy window): writes during it are covered by DDR-REQ-RST-*.
+  #   * ddr_fifo_intf C_FIFO_PROG_FULL_THRES / C_FIFO_PROG_EMPTY_THRES (FIFO
+  #     fill thresholds): a write against a full FIFO is held by `S_AXIS_READY`;
+  #     the pad under full is DDR-T2.14's case. Not swept by a test.
+  #   * ddr_stream_pkg C_BURST_WR_TIMEOUT_RATIO, C_BURST_RD_TIMEOUT_RATIO,
+  #     C_MIN_BURST_WR_WIDTH, C_MIN_BURST_RD_WIDTH: declared, used by no RTL
+  #     file (grep over rtl/ finds no user outside ddr_stream_pkg.vhd).
+
+  - id: DDR-REQ-FLUSH-1
+    kind: behavioral
+    desc: >-
+      IDLE FLUSH. When fewer than C_MSGS_PER_WORD accepted messages
+      (`S_AXIS_VALID`=1 & `S_AXIS_READY`=1 on `CLK_SYS`) wait in a partial DDR
+      word and no further write is accepted for C_IDLE_FLUSH_THRES (128)
+      `CLK_SYS` cycles, the IP commits that word completed with zero messages:
+      `WR_COMMIT_ADDR` covers it, its bytes on `M_AXI_WDATA` are the waiting
+      messages followed by zero messages, and the read side (`M_AXIS_DATA`,
+      `M_AXIS_VALID`) returns only the accepted messages, never the zeros.
+
+  - id: DDR-REQ-FLUSH-2
+    kind: behavioral
+    desc: >-
+      INPUT DOMAIN. An accepted write (`S_AXIS_VALID`=1 & `S_AXIS_READY`=1)
+      may arrive on ANY `CLK_SYS` cycle relative to the idle flush: before it,
+      on the cycle the idle threshold is reached (the flush-trigger cycle), and
+      one cycle before and after it, with any number p = 1 .. C_MSGS_PER_WORD-1
+      of messages waiting, at every supported ratio (`G_DDR_DATA_WIDTH` 128 and
+      256 with `G_USER_DATA_WIDTH` 32). The IP accepts such a write as any
+      other and DDR-REQ-FLUSH-3 and DDR-REQ-FLUSH-4 hold for it.
+
+  - id: DDR-REQ-FLUSH-3
+    kind: negative
+    desc: >-
+      No accepted message is lost or duplicated and no zero message reaches the
+      read side: for any write timing in the DDR-REQ-FLUSH-2 domain, the
+      sequence on `M_AXIS_DATA` (`M_AXIS_VALID`=1 & `M_AXIS_READY`=1) is exactly
+      the sequence of accepted `S_AXIS_DATA` values, in order. Checked with
+      distinct non-zero message values, so a loss, a duplicate or a leaked zero
+      changes the sequence.
+
+  - id: DDR-REQ-FLUSH-4
+    kind: negative
+    desc: >-
+      No extra DDR word: after N accepted messages followed by one idle flush,
+      `WR_COMMIT_ADDR` advances by exactly ceil(N / C_MSGS_PER_WORD) DDR words,
+      and no whole DDR word of zero messages is committed (the zeros of a flush
+      only complete a word that holds at least one accepted message).

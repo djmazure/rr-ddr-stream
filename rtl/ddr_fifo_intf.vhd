@@ -211,6 +211,12 @@ begin
     signal partial_cnt_r : unsigned(C_PAD_COUNT_W-1 downto 0)      := (others => '0');
     signal idle_cnt_r    : unsigned(C_IDLE_CNT_WIDTH-1 downto 0)   := (others => '0');
     signal pad_active_r  : std_logic                               := '0';
+    -- DDR-T2.24: a producer write may land on the flush-trigger cycle (pad_active_r is still 0 there, so
+    -- fifo_in_full_o admits it). The trigger, the pad count and the pad-event sideband must all see that write:
+    -- partial_eff is this cycle's count including it. Before, they used the pre-write count, so one
+    -- real word was stripped on the read side, or (partial = ratio-1) a whole zero DDR word was committed.
+    signal wr_land       : std_logic;
+    signal partial_eff   : unsigned(C_PAD_COUNT_W-1 downto 0);
 
     -- DDR-P3.2: track real-message writes (excluding pads) so we can
     -- snapshot the count at the moment a flush event starts and push
@@ -226,11 +232,14 @@ begin
     din   <= (others => '0') when pad_active_r = '1' else fifo_in_data_i;
     wr_en <= '1'             when pad_active_r = '1' else fifo_in_wren_i;
 
+    wr_land     <= '1' when pad_active_r = '0' and fifo_in_wren_i = '1' and full = '0' else '0';
+    partial_eff <= partial_cnt_r + 1 when wr_land = '1' else partial_cnt_r;   -- wraps at C_MSGS_PER_WORD
+
     -- Default the pad_event_fifo write strobe; the FSM may pulse it on
     -- a flush trigger below.
     pad_event_wr_en <= '0' when pad_active_r = '1'
                        else '1' when (idle_cnt_r = to_unsigned(C_IDLE_FLUSH_THRES, C_IDLE_CNT_WIDTH)
-                                       and partial_cnt_r /= 0
+                                       and partial_cnt_r /= 0 and partial_eff /= 0
                                        and pad_event_full = '0')
                        else '0';
     -- pad_event_din is packed: high bits = real-write-count snapshot at
@@ -239,7 +248,11 @@ begin
     -- in C_PAD_COUNT_W-bit arithmetic (ratio mod ratio = 0 maps the partial=0
     -- case which we never push anyway). Parameterised by the ratio so 256-bit
     -- DDR (ratio 8) flushes correctly, not just 128-bit (ratio 4).
-    pad_event_din <= std_logic_vector(real_wr_count_r) &
+    -- DDR-T2.24: the snapshot and the count include a write that lands on this cycle.
+    pad_event_din <= std_logic_vector(real_wr_count_r + 1) &
+                     std_logic_vector(to_unsigned(0, C_PAD_COUNT_W) - partial_eff)
+                     when wr_land = '1' else
+                     std_logic_vector(real_wr_count_r) &
                      std_logic_vector(to_unsigned(0, C_PAD_COUNT_W) - partial_cnt_r);
 
     pad_flush_proc : process(clk_sys_i) is
@@ -287,8 +300,12 @@ begin
             -- pad_event_fifo is written combinationally on the same edge
             -- (see pad_event_wr_en assignment above), so by the time
             -- pad_active_r='1' the event is already queued.
+            -- DDR-T2.24: partial_eff counts a write landing on this cycle; when that write completes the word
+            -- (partial_eff wraps to 0) there is nothing to pad. partial_cnt_r /= 0 keeps the trigger to a word
+            -- that was pending before this cycle: idle_cnt_r stays at the threshold through a long idle with
+            -- nothing pending, and the first write after it must not flush itself.
             if idle_cnt_r = to_unsigned(C_IDLE_FLUSH_THRES, C_IDLE_CNT_WIDTH)
-               and partial_cnt_r /= 0
+               and partial_cnt_r /= 0 and partial_eff /= 0
             then
               pad_active_r <= '1';
             end if;

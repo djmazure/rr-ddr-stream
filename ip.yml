@@ -63,7 +63,15 @@ license: MIT
 # synthesis. Also ships the AXE5-Eagle LPDDR4 validator example as an rr-only
 # build (DDR-P3.42) and names the public home, license and release path in the
 # README (DDR-P3.31).
-version: "0.3.7"
+# 0.3.8 (2026-11-12): the idle flush no longer loses or invents data when a
+# producer write lands on the flush-trigger cycle (DDR-T2.24, 006615e). Before,
+# with p messages waiting in a partial DDR word, such a write either lost one
+# real message on M_AXIS (p < ratio-1) or committed one extra all-zero DDR word
+# and returned ratio-1 zero messages on M_AXIS (p = ratio-1). Affected releases:
+# v0.2.0 to v0.3.7 (the pad-flush FSM came in 3b0e2d0). The contract states the
+# idle flush, its write-timing input domain and the prohibitions
+# (DDR-REQ-FLUSH-1..4, 19a383c).
+version: "0.3.8"
 
 hdl:
   # AXI is the v1 TOP. AVMM ships alongside it (DDR-P3.1, 2026-05-15)
